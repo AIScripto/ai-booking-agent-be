@@ -1,0 +1,114 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Tenant {
+  id           String        @id @default(uuid()) @db.Uuid
+  name         String
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  
+  users            User[]
+  voiceAgents      VoiceAgent[]
+  appointments     Appointment[]
+  callLogs         CallLog[]
+  googleCredential GoogleCredential?
+
+  @@map("tenants")
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String?
+  role         String   @default("USER") // ADMIN, USER
+  tenantId     String   @db.Uuid @map("tenant_id")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+model VoiceAgent {
+  id           String    @id @default(uuid()) @db.Uuid
+  name         String
+  systemPrompt String    @map("system_prompt")
+  voiceProvider String   @map("voice_provider") // vapi, retell
+  voiceAgentId String?   @map("voice_agent_id") // ID in Vapi/Retell
+  calendarId   String    @map("calendar_id")    // Target Google Calendar ID
+  tenantId     String    @db.Uuid @map("tenant_id")
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  
+  callLogs     CallLog[]
+
+  @@index([tenantId])
+  @@map("voice_agents")
+}
+
+model Appointment {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @db.Uuid @map("tenant_id")
+  tenant              Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  calendarId          String   @map("calendar_id")
+  appointmentDateTime DateTime @map("appointment_date_time")
+  customerName        String   @map("customer_name")
+  customerPhone       String   @map("customer_phone")
+  customerEmail       String?  @map("customer_email")
+  status              String   @default("SCHEDULED") // SCHEDULED, CANCELLED, COMPLETED
+  googleEventId       String?  @map("google_event_id")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  // Composite unique key prevents double bookings at database level
+  @@unique([tenantId, calendarId, appointmentDateTime])
+  @@index([tenantId])
+  @@index([calendarId])
+  @@index([appointmentDateTime])
+  @@map("appointments")
+}
+
+model CallLog {
+  id           String      @id @default(uuid()) @db.Uuid
+  tenantId     String      @db.Uuid @map("tenant_id")
+  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  voiceAgentId String?     @db.Uuid @map("voice_agent_id")
+  voiceAgent   VoiceAgent? @relation(fields: [voiceAgentId], references: [id], onDelete: Cascade)
+  callSid      String?     @map("call_sid") // Voice API call reference
+  duration     Int?
+  status       String      // e.g. "started", "completed", "failed"
+  transcript   String?
+  payload      Json        @map("payload")  // Full raw webhook payload
+  customerName  String?    @map("customer_name")
+  customerPhone String?    @map("customer_phone")
+  customerEmail String?    @map("customer_email")
+  purpose       String?    @map("purpose")
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([voiceAgentId])
+  @@map("call_logs")
+}
+
+model GoogleCredential {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @unique @db.Uuid @map("tenant_id")
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  accessToken  String   @map("access_token")
+  refreshToken String   @map("refresh_token")
+  expiryDate   DateTime @map("expiry_date")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("google_credentials")
+}
