@@ -7,49 +7,219 @@ generator client {
   provider = "prisma-client-js"
 }
 
+enum IndustryType {
+  HEALTHCARE
+  SALON_WELLNESS
+  LEGAL_CONSULTING
+  REAL_ESTATE
+  AUTOMOTIVE
+  FITNESS
+  GENERAL
+}
+
+enum UserRole {
+  ADMIN
+  PROVIDER
+  FRONT_DESK
+  PATIENT
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+}
+
 model Tenant {
-  id           String        @id @default(uuid()) @db.Uuid
+  id           String       @id @default(uuid()) @db.Uuid
   name         String
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  
+  industry     IndustryType @default(GENERAL)
+  branding     Json?        @map("branding")
+  calApiKey    String?      @map("cal_api_key")
+  calTeamId    Int?         @map("cal_team_id")
+  isActive     Boolean      @default(true) @map("is_active")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
   users            User[]
   voiceAgents      VoiceAgent[]
-  appointments     Appointment[]
+  appointments     Appointment[] // Legacy appointment model for backward compatibility
   callLogs         CallLog[]
   googleCredential GoogleCredential?
+
+  // Universal Multi-Tenant Relations
+  resources    Resource[]
+  serviceTypes ServiceType[]
+  customers    Customer[]
+  bookings     Booking[]
+  departments  Department[]
 
   @@map("tenants")
 }
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  email        String   @unique
-  passwordHash String   @map("password_hash")
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String    @map("password_hash")
   name         String?
-  role         String   @default("USER") // ADMIN, USER
-  tenantId     String   @db.Uuid @map("tenant_id")
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  role         UserRole  @default(ADMIN)
+  isActive     Boolean   @default(true) @map("is_active")
+  tenantId     String    @db.Uuid @map("tenant_id")
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  resourceId   String?   @unique @db.Uuid @map("resource_id")
+  resource     Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
 
   @@index([tenantId])
   @@map("users")
 }
 
+model Department {
+  id                String     @id @default(uuid()) @db.Uuid
+  tenantId          String     @db.Uuid @map("tenant_id")
+  tenant            Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name              String
+  code              String?
+  description       String?
+  buildingLocation  String?    @map("building_location")
+  isHipaaRestricted Boolean    @default(true) @map("is_hipaa_restricted")
+  maxDailyBookings  Int        @default(25) @map("max_daily_bookings")
+  isActive          Boolean    @default(true) @map("is_active")
+  resources         Resource[]
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("departments")
+}
+
+model Resource {
+  id            String      @id @default(uuid()) @db.Uuid
+  tenantId      String      @db.Uuid @map("tenant_id")
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  departmentId  String?     @db.Uuid @map("department_id")
+  department    Department? @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  name          String
+  email         String
+  title         String?     // e.g. "Doctor of Medicine", "Master Stylist", "Senior Partner"
+  avatarUrl     String?     @map("avatar_url")
+  calUserId     Int?        @unique @map("cal_user_id")
+  calScheduleId Int?        @map("cal_schedule_id")
+  isActive      Boolean     @default(true) @map("is_active")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  user     User?
+  bookings Booking[]
+
+  @@index([tenantId])
+  @@index([departmentId])
+  @@map("resources")
+}
+
+model ServiceType {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @db.Uuid @map("tenant_id")
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name            String   // e.g. "Consultation", "Haircut", "Strategy Call"
+  description     String?
+  durationMinutes Int      @default(30) @map("duration_minutes")
+  price           Decimal? @db.Decimal(10, 2)
+  depositRequired Decimal? @map("deposit_required") @db.Decimal(10, 2)
+  calEventTypeId  Int?     @unique @map("cal_event_type_id")
+  intakeSchema    Json?    @map("intake_schema") // Dynamic JSON schema for intake fields
+  isActive        Boolean  @default(true) @map("is_active")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  bookings Booking[]
+
+  @@index([tenantId])
+  @@map("service_types")
+}
+
+model Customer {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid @map("tenant_id")
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name      String
+  phone     String
+  email     String?
+  metadata  Json?    @map("metadata") // Custom client metadata (e.g. medical ID, VIN)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  bookings Booking[]
+
+  @@unique([tenantId, phone])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+model Booking {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @db.Uuid @map("tenant_id")
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  resourceId      String        @db.Uuid @map("resource_id")
+  resource        Resource      @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  serviceTypeId   String        @db.Uuid @map("service_type_id")
+  serviceType     ServiceType   @relation(fields: [serviceTypeId], references: [id], onDelete: Cascade)
+
+  customerId      String        @db.Uuid @map("customer_id")
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Cal.com Mapping References
+  calBookingId    Int?          @unique @map("cal_booking_id")
+  calUid          String?       @unique @map("cal_uid")
+
+  bookingDateTime DateTime      @map("booking_date_time")
+  durationMinutes Int           @default(30) @map("duration_minutes")
+  status          BookingStatus @default(CONFIRMED)
+  meetingUrl      String?       @map("meeting_url") // Telehealth / Video URL
+  isActive        Boolean       @default(true) @map("is_active")
+
+  // Dynamic Intake & Notes
+  intakeData      Json?         @map("intake_data")
+  providerNotes   String?       @db.Text @map("provider_notes")
+
+  callLogId       String?       @db.Uuid @map("call_log_id")
+  callLog         CallLog?      @relation(fields: [callLogId], references: [id], onDelete: SetNull)
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Mathematical Anti-Double-Booking Constraint
+  @@unique([tenantId, resourceId, bookingDateTime])
+  @@index([tenantId])
+  @@index([resourceId])
+  @@index([status])
+  @@map("bookings")
+}
+
 model VoiceAgent {
-  id           String    @id @default(uuid()) @db.Uuid
-  name         String
-  systemPrompt String    @map("system_prompt")
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  systemPrompt  String   @map("system_prompt")
   voiceProvider String   @map("voice_provider") // vapi, retell
-  voiceAgentId String?   @map("voice_agent_id") // ID in Vapi/Retell
-  calendarId   String    @map("calendar_id")    // Target Google Calendar ID
-  tenantId     String    @db.Uuid @map("tenant_id")
-  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdAt    DateTime  @default(now()) @map("created_at")
-  updatedAt    DateTime  @updatedAt @map("updated_at")
-  
-  callLogs     CallLog[]
+  voiceAgentId  String?  @map("voice_agent_id")
+  calendarId    String   @map("calendar_id")
+  tenantId      String   @db.Uuid @map("tenant_id")
+  tenant        Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  isActive      Boolean  @default(true) @map("is_active")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  callLogs CallLog[]
 
   @@index([tenantId])
   @@map("voice_agents")
@@ -64,12 +234,12 @@ model Appointment {
   customerName        String   @map("customer_name")
   customerPhone       String   @map("customer_phone")
   customerEmail       String?  @map("customer_email")
-  status              String   @default("SCHEDULED") // SCHEDULED, CANCELLED, COMPLETED
+  status              String   @default("SCHEDULED")
   googleEventId       String?  @map("google_event_id")
+  isActive            Boolean  @default(true) @map("is_active")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  // Composite unique key prevents double bookings at database level
   @@unique([tenantId, calendarId, appointmentDateTime])
   @@index([tenantId])
   @@index([calendarId])
@@ -78,22 +248,25 @@ model Appointment {
 }
 
 model CallLog {
-  id           String      @id @default(uuid()) @db.Uuid
-  tenantId     String      @db.Uuid @map("tenant_id")
-  tenant       Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  voiceAgentId String?     @db.Uuid @map("voice_agent_id")
-  voiceAgent   VoiceAgent? @relation(fields: [voiceAgentId], references: [id], onDelete: Cascade)
-  callSid      String?     @map("call_sid") // Voice API call reference
-  duration     Int?
-  status       String      // e.g. "started", "completed", "failed"
-  transcript   String?
-  payload      Json        @map("payload")  // Full raw webhook payload
-  customerName  String?    @map("customer_name")
-  customerPhone String?    @map("customer_phone")
-  customerEmail String?    @map("customer_email")
-  purpose       String?    @map("purpose")
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
+  id            String      @id @default(uuid()) @db.Uuid
+  tenantId      String      @db.Uuid @map("tenant_id")
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  voiceAgentId  String?     @db.Uuid @map("voice_agent_id")
+  voiceAgent    VoiceAgent? @relation(fields: [voiceAgentId], references: [id], onDelete: Cascade)
+  callSid       String?     @map("call_sid")
+  duration      Int?
+  status        String
+  transcript    String?
+  payload       Json        @map("payload")
+  customerName  String?     @map("customer_name")
+  customerPhone String?     @map("customer_phone")
+  customerEmail String?     @map("customer_email")
+  purpose       String?     @map("purpose")
+  isActive      Boolean     @default(true) @map("is_active")
+  createdAt     DateTime    @default(now()) @map("created_at")
+  updatedAt     DateTime    @updatedAt @map("updated_at")
+
+  bookings Booking[]
 
   @@index([tenantId])
   @@index([voiceAgentId])
@@ -107,6 +280,7 @@ model GoogleCredential {
   accessToken  String   @map("access_token")
   refreshToken String   @map("refresh_token")
   expiryDate   DateTime @map("expiry_date")
+  isActive     Boolean  @default(true) @map("is_active")
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 

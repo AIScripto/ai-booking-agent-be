@@ -1,19 +1,22 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../services/db.service';
 import { AppointmentService } from '../services/appointment.service';
+import { TelehealthService } from '../services/telehealth.service';
 import { z } from 'zod';
+
 
 export class AppointmentController {
   /**
    * Helper to extract and validate x-tenant-id header.
    */
   private static getTenantId(req: Request): string {
-    const tenantId = req.headers['x-tenant-id'];
+    const tenantId = req.headers['x-tenant-id'] || req.query.tenant_id || req.query.tenantId;
     if (!tenantId || typeof tenantId !== 'string' || !z.string().uuid().safeParse(tenantId).success) {
-      throw new Error('Unauthorized: Invalid or missing x-tenant-id header.');
+      throw new Error('Unauthorized: Invalid or missing x-tenant-id header or tenant_id query parameter.');
     }
     return tenantId;
   }
+
 
   /**
    * GET /api/v1/appointments
@@ -69,17 +72,20 @@ export class AppointmentController {
   ): Promise<void> {
     try {
       const tenantId = AppointmentController.getTenantId(req);
-      const { dateTime, customerName, customerPhone, customerEmail } = req.body;
+      const dateTimeRaw = req.body.dateTime || req.body.appointmentDateTime;
+      const { customerName, customerPhone, customerEmail } = req.body;
 
-      if (!dateTime || !customerName || !customerPhone) {
+
+      if (!dateTimeRaw || !customerName || !customerPhone) {
         res.status(400).json({
           status: 'error',
-          message: 'dateTime, customerName, and customerPhone are required fields.',
+          message: 'dateTime (or appointmentDateTime), customerName, and customerPhone are required fields.',
         });
         return;
       }
 
-      const parsedDate = new Date(dateTime);
+      const parsedDate = new Date(dateTimeRaw);
+
       if (isNaN(parsedDate.getTime())) {
         res.status(400).json({
           status: 'error',
@@ -170,4 +176,43 @@ export class AppointmentController {
       });
     }
   }
+
+  /**
+   * POST /api/v1/appointments/:id/telehealth
+   */
+  public static async generateTelehealthLink(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const tenantId = AppointmentController.getTenantId(req);
+      const { id } = req.params;
+      const provider = (req.body.provider as 'DAILY' | 'ZOOM' | 'GOOGLE_MEET') || 'DAILY';
+
+      if (!id) {
+        res.status(400).json({ status: 'error', message: 'Appointment ID parameter is required.' });
+        return;
+      }
+
+      const room = await TelehealthService.createVideoRoom(id, provider);
+
+      res.status(200).json({
+        status: 'success',
+        message: `${provider} video call link generated successfully.`,
+        data: {
+          appointmentId: id,
+          provider: room.provider,
+          roomUrl: room.roomUrl,
+          expiresAt: room.expiresAt,
+        },
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        status: 'error',
+        message: error.message || 'Failed to generate telehealth link.',
+      });
+    }
+  }
 }
+

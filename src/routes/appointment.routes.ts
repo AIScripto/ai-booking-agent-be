@@ -15,4 +15,8 @@ router.delete('/:id', AppointmentController.cancelAppointment);
 // Retrieve recent call logs
 router.get('/logs', AppointmentController.listCallLogs);
 
+// Generate video call link for an appointment
+router.post('/:id/telehealth', AppointmentController.generateTelehealthLink);
+
 export const appointmentRouter = router;
+

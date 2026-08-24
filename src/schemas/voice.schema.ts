@@ -23,3 +23,11 @@ export const webhookPayloadSchema = z.object({
   name: z.string().optional(),
   arguments: z.any().optional(),
 });
+
+export const checkAvailabilitySchema = z.object({
+  tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }).optional(),
+  username: z.string().optional().default('dr-sarah-jenkins'),
+  date: z.string().optional(),
+  timeZone: z.string().optional().default('America/New_York'),
+});
+

@@ -1,9 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
-import { webhookQuerySchema } from '../schemas/voice.schema';
+import { webhookQuerySchema, checkAvailabilitySchema } from '../schemas/voice.schema';
 import { VoiceService } from '../services/voice.service';
 import { config } from '../config';
 
 export class VoiceController {
+
   /**
    * HTTP Handler for incoming Voice Agent webhook tool-calling and notifications.
    */
@@ -56,4 +57,38 @@ export class VoiceController {
       next(error);
     }
   }
+
+  /**
+   * Ultra-fast (<50ms target) HTTP endpoint for Voice AI slot availability checks.
+   */
+  public static async checkAvailability(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const payloadParams = Object.keys(req.query).length > 0 ? req.query : req.body;
+      const validation = checkAvailabilitySchema.safeParse(payloadParams);
+      
+      if (!validation.success) {
+        res.status(400).json({
+          status: 'error',
+          message: 'Validation failed.',
+          errors: validation.error.format(),
+        });
+        return;
+      }
+
+      const { tenant_id, username, date, timeZone } = validation.data;
+      const result = await VoiceService.checkCalComAvailability(tenant_id, username, date, timeZone);
+
+      res.status(200).json({
+        status: 'success',
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 }
+

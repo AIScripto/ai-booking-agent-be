@@ -1,7 +1,10 @@
 import { prisma } from './db.service';
 import { GoogleCalendarService } from './google-calendar.service';
+import { SmsService } from './sms.service';
+import { EmailService } from './email.service';
 
 export class AppointmentService {
+
   /**
    * Checks availability of a slot across both the local database and the external Google Calendar.
    */
@@ -184,7 +187,23 @@ export class AppointmentService {
         data: { googleEventId },
       });
       console.log(`[AppointmentService.bgSyncGoogleCalendar] Successfully synced appointment ${appointmentId} to Google Calendar.`);
+
+      // Trigger Omnichannel Notifications (SMS/WhatsApp & Email with .ics file)
+      const dateTimeStr = details.start.toLocaleString();
+      const smsBody = SmsService.formatConfirmationText(details.customerName, 'Consultation', dateTimeStr);
+      SmsService.sendConfirmation({ to: details.customerPhone, body: smsBody }).catch((e) => console.error('[AppointmentService] SMS Error:', e));
+
+      if (details.customerEmail) {
+        EmailService.sendAppointmentConfirmation({
+          to: details.customerEmail,
+          subject: 'Appointment Confirmation & iCalendar Invite',
+          customerName: details.customerName,
+          serviceName: 'Consultation',
+          appointmentDateTime: details.start,
+        }).catch((e) => console.error('[AppointmentService] Email Error:', e));
+      }
     } catch (gcalError) {
+
       console.error(`[AppointmentService.bgSyncGoogleCalendar] Failed to sync appointment ${appointmentId} to Google Calendar:`, gcalError);
       // We do NOT roll back the database reservation. The booking remains in the local DB.
     }

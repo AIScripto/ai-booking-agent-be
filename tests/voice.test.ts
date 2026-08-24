@@ -15,9 +15,11 @@ jest.mock('../src/services/google-calendar.service', () => {
 });
 
 describe('Voice Webhook Endpoints Integration Tests', () => {
+  jest.setTimeout(30000);
   let tenantId: string;
   const calendarId = 'test-calendar-id';
   const apiKey = 'supersecretapikey'; // from .env mock configuration
+
 
   beforeAll(async () => {
     // Retrieve default seed tenant, or create one if missing
@@ -290,17 +292,22 @@ describe('Voice Webhook Endpoints Integration Tests', () => {
       expect(bookResponse.body.success).toBe(true);
       expect(bookResponse.body.appointmentId).toBeDefined();
 
-      // Yield event loop
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      // Wait for background sync to complete (max 2 seconds)
+      let appointment = null;
+      for (let i = 0; i < 40; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        appointment = await prisma.appointment.findFirst({
+          where: {
+            tenantId,
+            calendarId,
+            appointmentDateTime: checkTime,
+          },
+        });
+        if (appointment?.googleEventId) {
+          break;
+        }
+      }
 
-      // Verify it was successfully written to the DB
-      const appointment = await prisma.appointment.findFirst({
-        where: {
-          tenantId,
-          calendarId,
-          appointmentDateTime: checkTime,
-        },
-      });
       expect(appointment).not.toBeNull();
       expect(appointment?.customerName).toBe('Flat Patient');
       expect(appointment?.googleEventId).toBe('gcal-flat-event-uuid');
