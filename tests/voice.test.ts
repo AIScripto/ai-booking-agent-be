@@ -18,7 +18,7 @@ describe('Voice Webhook Endpoints Integration Tests', () => {
   jest.setTimeout(30000);
   let tenantId: string;
   const calendarId = 'test-calendar-id';
-  const apiKey = 'supersecretapikey'; // from .env mock configuration
+  const apiKey = require('../src/config').config.WEBHOOK_API_KEY;
 
 
   beforeAll(async () => {
