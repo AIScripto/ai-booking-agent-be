@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates openssl tzdata && 
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --legacy-peer-deps
 
 # Stage 2 installs full dependencies, generates Prisma Client, and compiles TS.
 FROM --platform=linux/amd64 ubuntu:24.04 AS builder
@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y curl ca-certificates openssl tzdata && 
     curl -fsSL https://deb.nodesource.com/setup_24.x | bash - && \
     apt-get install -y nodejs && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json* ./
-RUN npm ci
+RUN npm ci --legacy-peer-deps
 COPY tsconfig.json ./
 COPY src ./src
 COPY prisma ./prisma
