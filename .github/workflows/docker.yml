@@ -25,6 +25,20 @@ jobs:
     quality:
         name: Quality checks
         runs-on: ubuntu-latest
+        services:
+            postgres:
+                image: postgres:15
+                env:
+                    POSTGRES_USER: dummy
+                    POSTGRES_PASSWORD: dummy
+                    POSTGRES_DB: dummy_db
+                ports:
+                    - 5432:5432
+                options: >-
+                    --health-cmd pg_isready
+                    --health-interval 10s
+                    --health-timeout 5s
+                    --health-retries 5
 
         # src/config/index.ts validates the whole schema with Zod at import
         # time and calls process.exit(1) on any missing key. Typecheck, tests
@@ -34,6 +48,9 @@ jobs:
             NODE_ENV: test
             PORT: "6000"
             DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy_db"
+            PGHOST: "localhost"
+            PGUSER: "dummy"
+            PGPASSWORD: "dummy"
             GOOGLE_CLIENT_ID: "ci-dummy-client-id"
             GOOGLE_CLIENT_SECRET: "ci-dummy-client-secret"
             GOOGLE_REFRESH_TOKEN: "ci-dummy-refresh-token"
@@ -60,6 +77,9 @@ jobs:
 
             - name: Validate Prisma schema
               run: npx prisma validate
+
+            - name: Push Prisma schema to test DB
+              run: npx prisma db push
 
             # The single Definition-of-Done gate. Runs tsc --noEmit, the Jest
             # suite, and every guard in scripts/guards/ against the recorded
