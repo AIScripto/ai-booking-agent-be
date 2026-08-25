@@ -81,6 +81,9 @@ jobs:
             - name: Push Prisma schema to test DB
               run: npx prisma db push
 
+            - name: Seed test DB
+              run: npm run prisma:seed
+
             # The single Definition-of-Done gate. Runs tsc --noEmit, the Jest
             # suite, and every guard in scripts/guards/ against the recorded
             # baseline. This is the same command developers run locally —
