@@ -1,0 +1,3 @@
+The engineering rules for this repository live in AGENTS.md at the repo root.
+Read it before making any change; it is the single source of truth.
+The Definition of Done is docs/DEFINITION_OF_DONE.md — a task is not complete until `npm run verify` exits 0.

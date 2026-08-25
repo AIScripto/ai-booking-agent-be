@@ -1,0 +1,154 @@
+name: Backend CI/CD
+
+# Pull requests validate everything INCLUDING the Docker build, but publish
+# nothing. Only a merge to main pushes an image.
+on:
+    push:
+        branches:
+            - main
+    pull_request:
+        branches:
+            - main
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: backend-docker-${{ github.ref_name }}
+    cancel-in-progress: true
+
+env:
+    IMAGE_NAME: tariqsulehri/book4me_be
+
+jobs:
+    quality:
+        name: Quality checks
+        runs-on: ubuntu-latest
+
+        # src/config/index.ts validates the whole schema with Zod at import
+        # time and calls process.exit(1) on any missing key. Typecheck, tests
+        # and build all import it, so every key below must be present even
+        # though the values are meaningless in CI.
+        env:
+            NODE_ENV: test
+            PORT: "6000"
+            DATABASE_URL: "postgresql://dummy:dummy@localhost:5432/dummy_db"
+            GOOGLE_CLIENT_ID: "ci-dummy-client-id"
+            GOOGLE_CLIENT_SECRET: "ci-dummy-client-secret"
+            GOOGLE_REFRESH_TOKEN: "ci-dummy-refresh-token"
+            GOOGLE_REDIRECT_URI: "http://localhost:6000/api/v1/auth/google/callback"
+            GOOGLE_DEFAULT_CALENDAR_ID: "primary"
+            WEBHOOK_API_KEY: "ci-dummy-webhook-key"
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "24"
+                  cache: npm
+                  cache-dependency-path: package-lock.json
+
+            - name: Install dependencies
+              run: npm ci
+
+            - name: Generate Prisma Client
+              run: npx prisma generate
+
+            - name: Validate Prisma schema
+              run: npx prisma validate
+
+            # The single Definition-of-Done gate. Runs tsc --noEmit, the Jest
+            # suite, and every guard in scripts/guards/ against the recorded
+            # baseline. This is the same command developers run locally —
+            # CI and local must never diverge.
+            - name: Verify (typecheck + tests + guards)
+              run: npm run verify
+
+            - name: Build app
+              run: npm run build
+
+    # ── Pull request: prove the Dockerfile builds, publish nothing ──────────
+    # No `environment:` and no registry login — a PR must never touch
+    # production credentials. The build runs on a native amd64 runner and the
+    # result is discarded; a broken Dockerfile fails the PR instead of
+    # reaching main. Its layer cache warms the publish build below.
+    docker-validate:
+        name: Validate Docker image (no push)
+        runs-on: ubuntu-latest
+        needs: quality
+        if: github.event_name == 'pull_request'
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            - name: Setup Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Build image (validation only)
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  platforms: linux/amd64
+                  push: false
+                  tags: ${{ env.IMAGE_NAME }}:pr-validate
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+            - name: Publish summary
+              run: echo "Dockerfile validated on linux/amd64 — nothing published (pull request)." >> "${GITHUB_STEP_SUMMARY}"
+
+    # ── main: build and publish ─────────────────────────────────────────────
+    docker-publish:
+        name: Build and push Docker image
+        runs-on: ubuntu-latest
+        needs: quality
+        if: github.event_name != 'pull_request' && github.ref_name == 'main'
+        environment: production
+
+        steps:
+            - name: Checkout source
+              uses: actions/checkout@v4
+
+            - name: Resolve image tags
+              id: tags
+              shell: bash
+              run: |
+                  SHORT_SHA="${GITHUB_SHA::7}"
+                  ENV_TAG="production"
+                  {
+                    echo "env_tag=${ENV_TAG}"
+                    echo "sha_tag=${ENV_TAG}-${SHORT_SHA}"
+                    echo "tags=${IMAGE_NAME}:${ENV_TAG},${IMAGE_NAME}:${ENV_TAG}-${SHORT_SHA},${IMAGE_NAME}:latest"
+                  } >> "${GITHUB_OUTPUT}"
+
+            - name: Setup Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Login to Docker Hub
+              uses: docker/login-action@v3
+              with:
+                  username: ${{ secrets.DOCKERHUB_USERNAME }}
+                  password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+            - name: Build and push image
+              uses: docker/build-push-action@v6
+              with:
+                  context: .
+                  file: ./Dockerfile
+                  platforms: linux/amd64
+                  push: true
+                  tags: ${{ steps.tags.outputs.tags }}
+                  cache-from: type=gha
+                  cache-to: type=gha,mode=max
+
+            - name: Publish summary
+              run: |
+                  echo "Published \`${IMAGE_NAME}:${{ steps.tags.outputs.env_tag }}\`" >> "${GITHUB_STEP_SUMMARY}"
+                  echo "Published \`${IMAGE_NAME}:${{ steps.tags.outputs.sha_tag }}\`" >> "${GITHUB_STEP_SUMMARY}"
+                  echo "Published \`${IMAGE_NAME}:latest\`" >> "${GITHUB_STEP_SUMMARY}"

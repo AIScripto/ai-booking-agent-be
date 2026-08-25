@@ -1,0 +1,10 @@
+{
+  "_comment": "Recorded technical debt. Lower these freely; NEVER raise them. See AGENTS.md §9.",
+  "_updated": "2026-08-25",
+  "no_any": 22,
+  "layering": 3,
+  "tenant_isolation": 3,
+  "env_access": 12,
+  "external_calls": 0,
+  "validation": 1
+}
