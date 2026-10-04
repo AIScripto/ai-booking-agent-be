@@ -8,6 +8,13 @@ checked by the person or agent doing the work.
 > **Do not report a task complete without running `npm run verify`.**
 > If you could not run it, say so explicitly and say why.
 
+**Skills that operate against this document:**
+[`review-backend-code`](../.agents/skills/review-backend-code/SKILL.md) walks the checklist
+as an audit · [`write-backend-test`](../.agents/skills/write-backend-test/SKILL.md) covers §4
+· [`secure-node-endpoint`](../.agents/skills/secure-node-endpoint/SKILL.md) covers the auth
+debt below · [`scaffold-node-api`](../.agents/skills/scaffold-node-api/SKILL.md) builds new
+endpoints to this bar.
+
 ---
 
 ## 1. Gate — automated
@@ -44,6 +51,8 @@ Run `npm run verify` (or `npm run verify:quick` while iterating). It must exit *
 - [ ] Every new external call has `try/catch` and a defined fallback.
 - [ ] Every background promise has a `.catch()`. An unhandled rejection kills the process.
 - [ ] No failed integration can roll back a confirmed booking.
+- [ ] No response interpolates untrusted input into HTML, and none carries a stack
+      trace, an internal exception message, or a secret.
 
 ## 3. Voice-path latency — manual
 
@@ -105,10 +114,42 @@ theoretical. Fix: `updateMany({ where: { id, tenantId } })`, and reject when cou
 
 ### 🔴 P1 — no authentication anywhere
 
-No middleware verifies identity. `tenantId` comes from an unverified `x-tenant-id` header
-or query param, so every `/appointments/*` and `/tenant/*` endpoint is open to anyone who
-can reach the port. `User.passwordHash` exists; nothing issues or checks a session.
-Until fixed, no endpoint may be described as secured.
+No middleware verifies identity — `src/middlewares/` contains only `error.middleware.ts`.
+`tenantId` comes from an unverified `x-tenant-id` header or query param
+(`appointment.controller.ts:13`), so every `/appointments/*` and `/tenant/*` endpoint is open
+to anyone who can reach the port. `User.passwordHash` exists; nothing issues or checks a
+session, and `JWT_SECRET` is set in the deployment environment but referenced nowhere in
+`src/`. Until fixed, no endpoint may be described as secured.
+
+Note that the UUID check on line 14 raises a message beginning `'Unauthorized: ...'`. It is a
+**format** check, not an authorization check. Do not read it as coverage.
+
+### 🔴 P1 — `/voice/check-availability` has no API-key check
+
+`voice.controller.ts` verifies `WEBHOOK_API_KEY` in `handleWebhook`, but `checkAvailability`
+does not — and it is registered on **both** GET and POST (`voice.routes.ts:10-11`). It is a
+public, uncapped proxy into Cal.com keyed by a caller-supplied `tenant_id`: a tenant
+enumeration vector and, given the sub-50 ms design target, the cheapest endpoint in the
+service to abuse.
+
+Two lower-severity notes on the webhook check it sits next to: the comparison
+`clientKey !== config.WEBHOOK_API_KEY` is not constant-time, and it accepts the raw
+`authorization` header when the value is not `Bearer`-prefixed.
+
+### 🟠 P2 — reflected XSS in the OAuth callback
+
+`auth.controller.ts:97` interpolates `req.query.error` directly into an HTML response, and
+line 242 does the same with `error.message`. Both are attacker-controllable via a crafted
+redirect to `/api/v1/auth/google/callback?error=…`. These are the service's only
+HTML-rendering paths and neither escapes; line 242 additionally leaks internal exception
+text to the browser.
+
+### 🟠 P2 — CORS is fully open
+
+`app.ts:12` is a bare `app.use(cors())`, sending `Access-Control-Allow-Origin: *` on every
+route. Combined with `x-tenant-id` being the only "credential", any web page can read tenant
+data from a visitor's network position. `FRONTEND_URL` is already provisioned in the
+deployment environment for exactly this and is unused.
 
 ### 🟠 P2 — tenant-isolation gaps (baseline 3)
 
@@ -145,6 +186,10 @@ untrusted vendor input enters.
 
 - Slot cache is a per-process `Map`; Redis/BullMQ from the roadmap is absent, so cache
   invalidation does not propagate across instances.
-- Universal models (`Booking`, `Customer`, `ServiceType`) are migrated but unused — all
-  traffic still lands on legacy `Appointment`.
+- Universal models (`Booking`, `Customer`, `ServiceType`) are unused — all traffic still
+  lands on legacy `Appointment`. They were *not* migrated until 2026-08-27: they had been
+  created with `prisma db push`, so `migrate deploy` on a fresh database produced 6 of 12
+  tables and omitted `resources`. Closed by `20260827000000_baseline_universal_models`;
+  a rebuild from migrations alone is verified to match `schema.prisma`. **Never use
+  `prisma db push` on this project** — it is what caused the gap.
 - Test suite takes over 2 minutes with no watch-mode split.

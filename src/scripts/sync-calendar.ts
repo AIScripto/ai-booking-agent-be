@@ -25,7 +25,7 @@ async function syncCalendar() {
   const oauth2Client = new google.auth.OAuth2(
     config.GOOGLE_CLIENT_ID,
     config.GOOGLE_CLIENT_SECRET,
-    config.GOOGLE_REDIRECT_URI
+    config.GOOGLE_CALLBACK_URL
   );
 
   oauth2Client.setCredentials({

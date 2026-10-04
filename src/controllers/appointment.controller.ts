@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../services/db.service';
 import { AppointmentService } from '../services/appointment.service';
-import { TelehealthService } from '../services/telehealth.service';
+import { TelehealthService, TelehealthUnavailableError } from '../services/telehealth.service';
 import { z } from 'zod';
 
 
@@ -208,7 +208,11 @@ export class AppointmentController {
         },
       });
     } catch (error: any) {
-      res.status(400).json({
+      // A room that could not be provisioned is a provider or configuration fault,
+      // not a malformed request. 503 tells the caller to retry rather than to
+      // "fix" input that was already valid. Every other failure keeps its 400.
+      const statusCode = error instanceof TelehealthUnavailableError ? 503 : 400;
+      res.status(statusCode).json({
         status: 'error',
         message: error.message || 'Failed to generate telehealth link.',
       });

@@ -1,7 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SmsService } from '../src/services/sms.service';
 import { EmailService } from '../src/services/email.service';
-import { TelehealthService } from '../src/services/telehealth.service';
+import { TelehealthService, TelehealthUnavailableError } from '../src/services/telehealth.service';
 import { PaymentService } from '../src/services/payment.service';
 
 describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () => {
@@ -53,15 +53,99 @@ describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () 
   });
 
   describe('TelehealthService', () => {
-    it('should create virtual video room for Daily.co, Zoom, and Google Meet', async () => {
-      const roomDaily = await TelehealthService.createVideoRoom('appt-1234', 'DAILY');
-      expect(roomDaily.provider).toBe('DAILY');
-      expect(roomDaily.roomUrl).toContain('daily.co');
+    // Rooms are per appointment and there is no shared fallback room, so these
+    // tests pin the failure paths as hard as the happy path. External HTTP is
+    // mocked (AGENTS.md §10) — the suite must never create a real Daily.co room.
+    const originalKey = process.env.DAILY_API_KEY;
+    const originalFetch = global.fetch;
 
-      const roomZoom = await TelehealthService.createVideoRoom('appt-1234', 'ZOOM');
-      expect(roomZoom.provider).toBe('ZOOM');
-      expect(roomZoom.roomUrl).toContain('zoom.us');
+    beforeEach(() => {
+      process.env.DAILY_API_KEY = 'test-daily-key';
     });
+
+    afterEach(() => {
+      if (originalKey === undefined) {
+        delete process.env.DAILY_API_KEY;
+      } else {
+        process.env.DAILY_API_KEY = originalKey;
+      }
+      global.fetch = originalFetch;
+    });
+
+    /**
+     * Installs a stub `fetch` returning one canned response, and hands back a
+     * mutable call counter. Plain stub rather than `jest.fn()` so the response
+     * shape stays typed without reaching for `any` (R2).
+     */
+    const mockFetchOnce = (status: number, body: unknown): { count: number } => {
+      const calls = { count: 0 };
+      global.fetch = ((): Promise<Response> => {
+        calls.count += 1;
+        return Promise.resolve({
+          ok: status >= 200 && status < 300,
+          status,
+          json: () => Promise.resolve(body),
+        } as unknown as Response);
+      }) as unknown as typeof fetch;
+      return calls;
+    };
+
+    it('creates a room dedicated to the appointment', async () => {
+      const calls = mockFetchOnce(200, {
+        name: 'room_appt-123_1',
+        url: 'https://tenant.daily.co/room_appt-123_1',
+      });
+
+      const room = await TelehealthService.createVideoRoom('appt-1234', 'DAILY');
+
+      expect(room.provider).toBe('DAILY');
+      expect(room.roomUrl).toBe('https://tenant.daily.co/room_appt-123_1');
+      expect(room.expiresAt.getTime()).toBeGreaterThan(Date.now());
+      expect(calls.count).toBe(1);
+    });
+
+    it('throws rather than returning a shared room when the provider declines', async () => {
+      mockFetchOnce(401, { error: 'authentication-error' });
+
+      await expect(TelehealthService.createVideoRoom('appt-1234', 'DAILY')).rejects.toBeInstanceOf(
+        TelehealthUnavailableError
+      );
+    });
+
+    it('throws rather than returning a shared room when the provider is unreachable', async () => {
+      global.fetch = ((): Promise<Response> =>
+        Promise.reject(new Error('ECONNREFUSED'))) as unknown as typeof fetch;
+
+      await expect(TelehealthService.createVideoRoom('appt-1234', 'DAILY')).rejects.toBeInstanceOf(
+        TelehealthUnavailableError
+      );
+    });
+
+    it('throws when the API key is missing or a placeholder', async () => {
+      const calls = mockFetchOnce(200, { url: 'https://tenant.daily.co/x' });
+
+      delete process.env.DAILY_API_KEY;
+      await expect(TelehealthService.createVideoRoom('a', 'DAILY')).rejects.toBeInstanceOf(
+        TelehealthUnavailableError
+      );
+
+      process.env.DAILY_API_KEY = 'daily_api_key_placeholder';
+      await expect(TelehealthService.createVideoRoom('a', 'DAILY')).rejects.toBeInstanceOf(
+        TelehealthUnavailableError
+      );
+
+      // Never contacted the provider with an unusable key.
+      expect(calls.count).toBe(0);
+    });
+
+    it.each(['ZOOM', 'GOOGLE_MEET'] as const)(
+      'throws for %s instead of inventing an unreachable link',
+      async (provider) => {
+        await expect(TelehealthService.createVideoRoom('appt-1234', provider)).rejects.toBeInstanceOf(
+          TelehealthUnavailableError
+        );
+      }
+    );
   });
 
   describe('PaymentService', () => {

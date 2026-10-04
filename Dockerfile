@@ -43,14 +43,14 @@ COPY --from=builder   /build/node_modules/.prisma ./node_modules/.prisma
 COPY prisma ./prisma
 
 # Default port the API binds. Overridden at runtime by PORT in the env file —
-# docker-compose.yml maps 6000:6000, so PORT must match the published port.
-ENV PORT=6000
-EXPOSE 6000
+# docker-compose.yml maps 5000:5000, so PORT must match the published port.
+ENV PORT=5000
+EXPOSE 5000
 
 # Node 24 has built-in fetch, so the healthcheck does not need curl/wget.
-# Probes ${PORT} rather than a literal: hardcoding 6000 here made the container
+# Probes ${PORT} rather than a literal: hardcoding 5000 here made the container
 # report unhealthy forever, because the app binds whatever PORT says.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD ["/bin/sh", "-c", "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||6000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+    CMD ["/bin/sh", "-c", "node -e \"fetch('http://127.0.0.1:'+(process.env.PORT||5000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
 
 CMD ["node", "dist/server.js"]

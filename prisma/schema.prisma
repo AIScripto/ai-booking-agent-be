@@ -237,6 +237,19 @@ model Appointment {
   status              String   @default("SCHEDULED")
   googleEventId       String?  @map("google_event_id")
   isActive            Boolean  @default(true) @map("is_active")
+
+  // ── Telehealth ────────────────────────────────────────────────────────────
+  // The opaque id in the stable link sent to the customer
+  // (https://<host>/j/<token>). Issued once at booking time and never rotated,
+  // so an SMS already delivered stays valid across reschedules.
+  joinToken           String?  @unique @map("join_token")
+  // The provisioned room. Minted lazily on first visit rather than at booking
+  // time: provider rooms expire, so a booking three weeks out would otherwise
+  // ship a link that is already dead on arrival.
+  meetingUrl          String?  @map("meeting_url")
+  meetingProvider     String?  @map("meeting_provider")
+  meetingExpiresAt    DateTime? @map("meeting_expires_at")
+
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
