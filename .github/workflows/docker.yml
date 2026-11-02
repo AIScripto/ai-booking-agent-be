@@ -54,7 +54,7 @@ jobs:
             GOOGLE_CLIENT_ID: "ci-dummy-client-id"
             GOOGLE_CLIENT_SECRET: "ci-dummy-client-secret"
             GOOGLE_REFRESH_TOKEN: "ci-dummy-refresh-token"
-            GOOGLE_REDIRECT_URI: "http://localhost:6000/api/v1/auth/google/callback"
+            GOOGLE_CALLBACK_URL: "http://localhost:6000/api/v1/auth/google/callback"
             GOOGLE_DEFAULT_CALENDAR_ID: "primary"
             WEBHOOK_API_KEY: "ci-dummy-webhook-key"
 
