@@ -5,6 +5,8 @@
  * Designed to work seamlessly with both Cloud Cal.com and Self-Hosted instances.
  */
 
+import { TIMEOUTS } from '../config/timeouts';
+
 export interface SlotAvailabilityQuery {
   username: string;
   startTime: string; // ISO 8601 string e.g. "2026-08-11T09:00:00Z"
@@ -60,6 +62,7 @@ export class CalComService {
           'Authorization': `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
         },
+        signal: AbortSignal.timeout(TIMEOUTS.VOICE_CALL_MS),
       });
 
       if (!response.ok) {
@@ -90,6 +93,7 @@ export class CalComService {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(TIMEOUTS.BACKGROUND_CALL_MS),
       });
 
       if (!response.ok) {

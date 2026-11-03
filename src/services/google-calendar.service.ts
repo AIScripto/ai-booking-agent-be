@@ -1,6 +1,7 @@
 import { google } from 'googleapis';
 import { config } from '../config';
 import { prisma } from './db.service';
+import { TIMEOUTS } from '../config/timeouts';
 
 export class GoogleCalendarService {
   /**
@@ -8,11 +9,14 @@ export class GoogleCalendarService {
    * If the tenant does not have dynamic Google Credentials stored, falls back to the central .env configuration.
    */
   private static async getCalendarClient(tenantId: string) {
-    const oauth2Client = new google.auth.OAuth2(
-      config.GOOGLE_CLIENT_ID,
-      config.GOOGLE_CLIENT_SECRET,
-      config.GOOGLE_CALLBACK_URL
-    );
+    // transporterOptions.timeout also covers the automatic access-token refresh,
+    // which otherwise has no deadline.
+    const oauth2Client = new google.auth.OAuth2({
+      clientId: config.GOOGLE_CLIENT_ID,
+      clientSecret: config.GOOGLE_CLIENT_SECRET,
+      redirectUri: config.GOOGLE_CALLBACK_URL,
+      transporterOptions: { timeout: TIMEOUTS.BACKGROUND_CALL_MS },
+    });
 
     // Look up tenant-specific credentials in Postgres
     const credentials = await prisma.googleCredential.findUnique({
@@ -108,13 +112,17 @@ export class GoogleCalendarService {
       const timeMin = start.toISOString();
       const timeMax = new Date(start.getTime() + durationMinutes * 60000).toISOString();
 
-      const response = await calendar.events.list({
-        calendarId,
-        timeMin,
-        timeMax,
-        singleEvents: true,
-        orderBy: 'startTime',
-      });
+      // A caller may be waiting: give up quickly (the catch below treats it as unavailable).
+      const response = await calendar.events.list(
+        {
+          calendarId,
+          timeMin,
+          timeMax,
+          singleEvents: true,
+          orderBy: 'startTime',
+        },
+        { timeout: TIMEOUTS.VOICE_CALL_MS }
+      );
 
       const events = response.data.items || [];
       return events.length === 0;
@@ -154,20 +162,23 @@ export class GoogleCalendarService {
       const duration = details.durationMinutes || 30;
       const end = new Date(details.start.getTime() + duration * 60000);
 
-      const event = await calendar.events.insert({
-        calendarId,
-        requestBody: {
-          summary: `Appointment: ${details.customerName}`,
-          description: `Voice Agent Booking\nCustomer: ${details.customerName}\nPhone: ${details.customerPhone}\nEmail: ${details.customerEmail || 'N/A'}`,
-          start: {
-            dateTime: details.start.toISOString(),
+      const event = await calendar.events.insert(
+        {
+          calendarId,
+          requestBody: {
+            summary: `Appointment: ${details.customerName}`,
+            description: `Voice Agent Booking\nCustomer: ${details.customerName}\nPhone: ${details.customerPhone}\nEmail: ${details.customerEmail || 'N/A'}`,
+            start: {
+              dateTime: details.start.toISOString(),
+            },
+            end: {
+              dateTime: end.toISOString(),
+            },
+            attendees: details.customerEmail ? [{ email: details.customerEmail }] : [],
           },
-          end: {
-            dateTime: end.toISOString(),
-          },
-          attendees: details.customerEmail ? [{ email: details.customerEmail }] : [],
         },
-      });
+        { timeout: TIMEOUTS.BACKGROUND_CALL_MS }
+      );
 
       if (!event.data.id) {
         throw new Error('Google Calendar API response did not contain an event ID.');
@@ -198,10 +209,13 @@ export class GoogleCalendarService {
       }
 
       const calendar = await this.getCalendarClient(tenantId);
-      await calendar.events.delete({
-        calendarId,
-        eventId: googleEventId,
-      });
+      await calendar.events.delete(
+        {
+          calendarId,
+          eventId: googleEventId,
+        },
+        { timeout: TIMEOUTS.BACKGROUND_CALL_MS }
+      );
     } catch (error) {
       console.error(`[GoogleCalendarService.deleteEvent] Error deleting event ${googleEventId} in ${calendarId} for tenant ${tenantId}:`, error);
       throw new Error(`Failed to delete Google Calendar event: ${(error as Error).message}`);

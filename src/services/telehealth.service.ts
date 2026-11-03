@@ -9,6 +9,8 @@
  * that plainly — never hand out a room that is not this appointment's.
  */
 
+import { TIMEOUTS } from '../config/timeouts';
+
 export interface TelehealthRoom {
   roomId: string;
   roomUrl: string;
@@ -99,6 +101,7 @@ export class TelehealthService {
           name: roomId,
           properties: { exp: Math.floor(expiresAt.getTime() / 1000) },
         }),
+        signal: AbortSignal.timeout(TIMEOUTS.BACKGROUND_CALL_MS),
       });
     } catch (error) {
       const cause = error instanceof Error ? error.message : 'unknown network error';

@@ -2,6 +2,7 @@ import { prisma } from './db.service';
 import { GoogleCalendarService } from './google-calendar.service';
 import { SmsService } from './sms.service';
 import { EmailService } from './email.service';
+import { TIMEOUTS } from '../config/timeouts';
 
 export class AppointmentService {
 
@@ -53,7 +54,14 @@ export class AppointmentService {
     // Start searching from the next 30-minute interval
     let currentCheck = new Date(startFrom.getTime() + durationMinutes * 60000);
 
+    // Each check can call Google. Stop when the total time is used up, so a caller
+    // is never left waiting through many slow checks in a row.
+    const deadline = Date.now() + TIMEOUTS.NEXT_SLOT_SEARCH_MS;
+
     for (let i = 0; i < maxSearchSteps; i++) {
+      if (Date.now() >= deadline) {
+        return null;
+      }
       const isAvailable = await this.checkAvailability(
         tenantId,
         calendarId,
