@@ -94,6 +94,14 @@ export class AppointmentService {
       durationMinutes?: number;
     }
   ): Promise<any> {
+    // A retry of the same request is not a conflict. If this customer already holds this
+    // exact slot, return that appointment (voice platforms redeliver webhooks, and
+    // staff can double-click). No second row, no second notification.
+    const alreadyHeld = await this.findHeldByCustomer(tenantId, data);
+    if (alreadyHeld) {
+      return alreadyHeld;
+    }
+
     // Double-check availability first to avoid unnecessary failures
     const isAvailable = await this.checkAvailability(
       tenantId,
@@ -171,6 +179,11 @@ export class AppointmentService {
         },
       });
       if (reclaimed.count !== 1) {
+        // Two identical requests can race: the other one just won. Same customer means success.
+        const racedWinner = await this.findHeldByCustomer(tenantId, data);
+        if (racedWinner) {
+          return racedWinner;
+        }
         throw new Error('Concurrency conflict: The requested slot was booked by another caller.');
       }
       appointment = await prisma.appointment.findFirst({
@@ -198,6 +211,24 @@ export class AppointmentService {
     });
 
     return appointment;
+  }
+
+  /**
+   * The scheduled appointment for this exact slot, if it belongs to the same customer phone.
+   */
+  private static async findHeldByCustomer(
+    tenantId: string,
+    data: { calendarId: string; appointmentDateTime: Date; customerPhone: string }
+  ) {
+    return prisma.appointment.findFirst({
+      where: {
+        tenantId,
+        calendarId: data.calendarId,
+        appointmentDateTime: data.appointmentDateTime,
+        customerPhone: data.customerPhone,
+        status: 'SCHEDULED',
+      },
+    });
   }
 
   /**

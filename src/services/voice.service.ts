@@ -237,31 +237,53 @@ export class VoiceService {
       }
     }
 
-    // 1. If callSid is provided, check if it's already in the database
+    // 1. If callSid is provided, there must be exactly one row per (tenant, call).
+    // Events for one call can arrive together. A transaction-scoped database lock keyed on
+    // the tenant and call makes them queue up, so find-then-write cannot create two rows.
     if (callSid) {
-      const existing = await prisma.callLog.findFirst({
-        where: { tenantId, callSid },
-      });
+      await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${callSid}))`;
 
-      if (existing) {
-        await prisma.callLog.update({
-          where: { id: existing.id },
+        const existing = await tx.callLog.findFirst({
+          where: { tenantId, callSid },
+        });
+
+        if (existing) {
+          await tx.callLog.updateMany({
+            where: { id: existing.id, tenantId },
+            data: {
+              status: callStatus,
+              transcript: transcript || existing.transcript,
+              duration: duration ? Math.round(duration) : existing.duration,
+              customerName: finalCustomerName || existing.customerName,
+              customerPhone: customerPhone || existing.customerPhone,
+              customerEmail: finalCustomerEmail || existing.customerEmail,
+              purpose: purpose || existing.purpose,
+              payload: payload,
+            },
+          });
+          return;
+        }
+
+        await tx.callLog.create({
           data: {
+            tenantId,
+            callSid,
             status: callStatus,
-            transcript: transcript || existing.transcript,
-            duration: duration ? Math.round(duration) : existing.duration,
-            customerName: finalCustomerName || existing.customerName,
-            customerPhone: customerPhone || existing.customerPhone,
-            customerEmail: finalCustomerEmail || existing.customerEmail,
-            purpose: purpose || existing.purpose,
+            duration: duration ? Math.round(duration) : null,
+            transcript,
+            customerName: finalCustomerName,
+            customerPhone,
+            customerEmail: finalCustomerEmail,
+            purpose,
             payload: payload,
           },
         });
-        return;
-      }
+      });
+      return;
     }
 
-    // 2. Otherwise, create a new CallLog row
+    // 2. No call id: nothing to match on, so create a new CallLog row
     await prisma.callLog.create({
       data: {
         tenantId,
