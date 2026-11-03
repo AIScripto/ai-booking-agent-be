@@ -3,6 +3,16 @@ import { google } from 'googleapis';
 import { config } from '../config';
 import { prisma } from '../services/db.service';
 import { z } from 'zod';
+import { OAuthStateService } from '../services/oauth-state.service';
+
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
 
 export class AuthController {
   /**
@@ -54,7 +64,7 @@ export class AuthController {
           return;
         }
         const backendUrl = `${req.protocol}://${req.get('host')}`;
-        const authUrl = `${backendUrl}/api/v1/auth/google/callback?code=mock-code&state=${tenantId}`;
+        const authUrl = `${backendUrl}/api/v1/auth/google/callback?code=mock-code&state=${encodeURIComponent(OAuthStateService.create(tenantId))}`;
         res.status(200).json({
           status: 'success',
           authUrl,
@@ -72,7 +82,7 @@ export class AuthController {
         access_type: 'offline', // Request permanent refresh token
         prompt: 'consent',     // Force consent screen to guarantee refresh token is returned
         scope: ['https://www.googleapis.com/auth/calendar.events'],
-        state: tenantId,        // Pass tenantId securely in the OAuth state parameter
+        state: OAuthStateService.create(tenantId), // Signed, expiring, single-use
       });
 
       res.status(200).json({
@@ -94,26 +104,29 @@ export class AuthController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const { code, state: tenantId, error } = req.query;
+      const { code, state, error } = req.query;
 
       if (error) {
         res.status(400).send(`
           <html>
             <body style="font-family: Arial, sans-serif; text-align: center; padding-top: 100px; background-color: #f8fafc;">
               <h2 style="color: #ef4444;">OAuth Authentication Failed</h2>
-              <p>${error}</p>
+              <p>${escapeHtml(error)}</p>
             </body>
           </html>
         `);
         return;
       }
 
-      if (!code || !tenantId || typeof tenantId !== 'string' || !z.string().uuid().safeParse(tenantId).success) {
+      // The state must be one we issued: signed, not expired, and not used before.
+      const tenantId = OAuthStateService.consume(state);
+
+      if (!code || !tenantId || !z.string().uuid().safeParse(tenantId).success) {
         res.status(400).send(`
           <html>
             <body style="font-family: Arial, sans-serif; text-align: center; padding-top: 100px; background-color: #f8fafc;">
               <h2 style="color: #ef4444;">Invalid Request</h2>
-              <p>Missing auth code or invalid tenant session ID.</p>
+              <p>Missing auth code, or the sign-in link is invalid, expired or already used. Please start again from the dashboard.</p>
             </body>
           </html>
         `);
@@ -256,7 +269,7 @@ export class AuthController {
         <html>
           <body style="font-family: Arial, sans-serif; text-align: center; padding-top: 100px; background-color: #f8fafc; color: #334155;">
             <h2 style="color: #ef4444;">Server Error</h2>
-            <p>Failed to exchange Google OAuth authorization token: ${error.message || error}</p>
+            <p>Failed to connect Google Calendar. Please try again.</p>
           </body>
         </html>
       `);
