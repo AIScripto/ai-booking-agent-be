@@ -159,10 +159,26 @@ export class AppointmentController {
     try {
       const tenantId = AppointmentController.getTenantId(req);
 
+      // The list leaves out transcript and payload. They hold the most sensitive
+      // data and are served one at a time by getCallLog.
       const logs = await prisma.callLog.findMany({
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
         take: 30, // Limit to recent logs for dashboard view
+        select: {
+          id: true,
+          tenantId: true,
+          voiceAgentId: true,
+          callSid: true,
+          duration: true,
+          status: true,
+          customerName: true,
+          customerPhone: true,
+          customerEmail: true,
+          purpose: true,
+          createdAt: true,
+          updatedAt: true,
+        },
       });
 
       res.status(200).json({
@@ -173,6 +189,40 @@ export class AppointmentController {
       res.status(400).json({
         status: 'error',
         message: error.message || 'Failed to retrieve call logs.',
+      });
+    }
+  }
+
+  /**
+   * GET /api/v1/appointments/logs/:id
+   * One call log with transcript and payload. Filtered by tenant in the same query.
+   */
+  public static async getCallLog(
+    req: Request,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> {
+    try {
+      const tenantId = AppointmentController.getTenantId(req);
+      const id = z.string().uuid().safeParse(req.params.id);
+      if (!id.success) {
+        res.status(400).json({ status: 'error', message: 'Invalid call log id.' });
+        return;
+      }
+
+      const log = await prisma.callLog.findFirst({
+        where: { id: id.data, tenantId },
+      });
+      if (!log) {
+        res.status(404).json({ status: 'error', message: 'Call log not found.' });
+        return;
+      }
+
+      res.status(200).json({ status: 'success', data: log });
+    } catch (error: unknown) {
+      res.status(400).json({
+        status: 'error',
+        message: error instanceof Error && error.message ? error.message : 'Failed to retrieve call log.',
       });
     }
   }

@@ -15,6 +15,9 @@ router.delete('/:id', AppointmentController.cancelAppointment);
 // Retrieve recent call logs
 router.get('/logs', AppointmentController.listCallLogs);
 
+// Retrieve one call log with transcript and payload
+router.get('/logs/:id', AppointmentController.getCallLog);
+
 // Generate video call link for an appointment
 router.post('/:id/telehealth', AppointmentController.generateTelehealthLink);
 

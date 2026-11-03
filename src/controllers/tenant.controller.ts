@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { prisma } from '../services/db.service';
 import { getVocabulary } from '../config/industry-vocabulary';
+import { z } from 'zod';
+import { IndustryType } from '@prisma/client';
 import { slotCacheService } from '../services/slot-cache.service';
 
 
@@ -94,12 +96,22 @@ export class TenantController {
         return;
       }
 
+      const parsedIndustry = industry === undefined || industry === null || industry === ''
+        ? { success: true as const, data: undefined }
+        : z.nativeEnum(IndustryType).safeParse(industry);
+      if (!parsedIndustry.success) {
+        res.status(400).json({ status: 'error', message: 'Invalid industry.' });
+        return;
+      }
+
+      // Explicit field list: never return calApiKey or other secrets.
       const updated = await prisma.tenant.update({
         where: { id: tenantId },
         data: {
-          industry: industry || undefined,
+          industry: parsedIndustry.data,
           branding: branding || undefined,
         },
+        select: { id: true, name: true, industry: true, branding: true },
       });
 
       res.status(200).json({
