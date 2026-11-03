@@ -9,6 +9,16 @@ const server = app.listen(config.PORT, async () => {
     // Verify database connection at startup
     await prisma.$connect();
     console.log('✅ Database connection verified successfully.');
+
+    // Open some connections now. With a distant database, opening one takes seconds, and a user
+    // should not wait for that on their first clicks. A failure here is not fatal.
+    if (config.DB_WARM_CONNECTIONS > 0) {
+      const started = Date.now();
+      await Promise.allSettled(
+        Array.from({ length: config.DB_WARM_CONNECTIONS }, () => prisma.$queryRaw`SELECT 1`)
+      );
+      console.log(`🔥 Warmed ${config.DB_WARM_CONNECTIONS} database connections in ${Date.now() - started} ms.`);
+    }
     console.log(`📡 Inbound Voice Webhooks listening at: http://localhost:${config.PORT}/api/v1/voice/webhook`);
   } catch (error) {
     console.error('❌ Failed to connect to the database during startup:', error);

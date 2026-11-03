@@ -18,6 +18,14 @@ const configSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters.'),
   // How long an access token stays valid, for example 15m. Kept short: the refresh cookie renews it.
   JWT_EXPIRES_IN: z.string().default('15m'),
+  // Database connection pool. When the database is far from the app, each round trip is slow and
+  // opening a connection can take seconds, so allow a bigger pool and a longer wait. These apply
+  // only if the DATABASE_URL does not already set connection_limit, pool_timeout or connect_timeout.
+  DB_CONNECTION_LIMIT: z.coerce.number().int().min(1).max(100).default(20),
+  DB_POOL_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(120).default(30),
+  DB_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(120).default(15),
+  // Connections opened at start-up so the first users do not pay for opening them.
+  DB_WARM_CONNECTIONS: z.coerce.number().int().min(0).max(50).default(5),
   // How many days a refresh cookie stays valid without being used (it is renewed on every use).
   REFRESH_TOKEN_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   // Time zone used when speaking or messaging a time to a customer. Times are stored in UTC.
