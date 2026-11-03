@@ -2,6 +2,7 @@ module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
   testMatch: ['**/*.test.ts'],
+  setupFiles: ['<rootDir>/tests/setup-env.js'],
   verbose: true,
   forceExit: true,
   // Integration tests talk to a real database and can be slow on a busy machine.

@@ -26,6 +26,9 @@ const configSchema = z.object({
   DB_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(120).default(15),
   // Connections opened at start-up so the first users do not pay for opening them.
   DB_WARM_CONNECTIONS: z.coerce.number().int().min(0).max(50).default(5),
+  // How many seconds the server remembers that a user is active (saves a database round trip per
+  // request). A deactivated user keeps access for at most this long. 0 turns it off.
+  AUTH_CACHE_SECONDS: z.coerce.number().int().min(0).max(60).default(10),
   // How many days a refresh cookie stays valid without being used (it is renewed on every use).
   REFRESH_TOKEN_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   // Time zone used when speaking or messaging a time to a customer. Times are stored in UTC.

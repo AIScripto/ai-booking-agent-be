@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
 import { prisma } from './db.service';
+import { AuthCache } from './auth-cache';
 
 export type StaffRole = 'ADMIN' | 'PROVIDER' | 'FRONT_DESK' | 'PATIENT';
 
@@ -41,6 +42,9 @@ function getDummyHash(): Promise<string> {
   dummyHash ??= bcrypt.hash('not-a-real-password', BCRYPT_ROUNDS);
   return dummyHash;
 }
+
+/** Shared by every request in this process. See auth-cache.ts for the trade-off. */
+export const authCache = new AuthCache(config.AUTH_CACHE_SECONDS);
 
 export interface AuthResult {
   token: string;
@@ -162,6 +166,7 @@ export class AuthService {
       where: { id: claims.sub, tenantId: claims.tid },
       data: { updatedAt: new Date() },
     });
+    authCache.invalidateUser(claims.sub);
   }
 
   public static signToken(ctx: AuthContext): string {
@@ -190,13 +195,18 @@ export class AuthService {
 
     if (typeof claims.sub !== 'string' || typeof claims.tid !== 'string') return null;
 
+    const cached = authCache.get(claims.sub, claims.tid);
+    if (cached) return cached;
+
     const user = await prisma.user.findFirst({
       where: { id: claims.sub, tenantId: claims.tid, isActive: true },
       select: { id: true, tenantId: true, role: true },
     });
     if (!user) return null;
 
-    return { userId: user.id, tenantId: user.tenantId, role: user.role };
+    const ctx: AuthContext = { userId: user.id, tenantId: user.tenantId, role: user.role };
+    authCache.set(ctx);
+    return ctx;
   }
 
   /**
