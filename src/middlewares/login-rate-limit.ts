@@ -28,6 +28,16 @@ export const loginLimitPerAccount = rateLimit({
   message: tooMany,
 });
 
+/** Renewing a session is cheap and frequent, so the limit is generous; it only stops floods. */
+export const refreshLimitPerAddress = rateLimit({
+  windowMs: WINDOW_MS,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => ipKeyGenerator(req.ip ?? ''),
+  message: { status: 'error', message: 'Too many requests. Please wait a few minutes and try again.' },
+});
+
 export const loginLimitPerAddress = rateLimit({
   windowMs: WINDOW_MS,
   limit: 30,

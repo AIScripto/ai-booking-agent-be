@@ -16,8 +16,10 @@ const configSchema = z.object({
   WEBHOOK_API_KEY: z.string(),
   // Signs login tokens. Use a long random value (at least 32 characters) and keep it secret.
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters.'),
-  // How long a login token stays valid, for example 8h or 30m.
-  JWT_EXPIRES_IN: z.string().default('8h'),
+  // How long an access token stays valid, for example 15m. Kept short: the refresh cookie renews it.
+  JWT_EXPIRES_IN: z.string().default('15m'),
+  // How many days a refresh cookie stays valid without being used (it is renewed on every use).
+  REFRESH_TOKEN_DAYS: z.coerce.number().int().min(1).max(30).default(7),
   // Time zone used when speaking or messaging a time to a customer. Times are stored in UTC.
   // Per-tenant time zones need a schema change; until then this one applies to everyone.
   DEFAULT_TIME_ZONE: z

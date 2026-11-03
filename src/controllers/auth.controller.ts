@@ -3,6 +3,52 @@ import { google } from 'googleapis';
 import { config } from '../config';
 import { prisma } from '../services/db.service';
 import { z } from 'zod';
+
+const REFRESH_COOKIE = 'refresh_token';
+const REFRESH_COOKIE_PATH = '/api/v1/auth';
+
+/** Reads one cookie from the Cookie header (no extra package needed). */
+function readCookie(req: Request, name: string): string | null {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const index = part.indexOf('=');
+    if (index === -1) continue;
+    if (part.slice(0, index).trim() === name) {
+      try {
+        return decodeURIComponent(part.slice(index + 1).trim());
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * The refresh token lives only in this cookie: JavaScript cannot read it (httpOnly), it is only
+ * sent to the auth endpoints (path), and never on requests from other sites (SameSite=Strict).
+ * `secure` follows the connection: on plain http (today's VM address) a Secure cookie would be
+ * dropped by the browser, so it is turned on automatically once the site is served over https.
+ */
+function setRefreshCookie(req: Request, res: Response, token: string): void {
+  res.cookie(REFRESH_COOKIE, token, {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: req.secure,
+    path: REFRESH_COOKIE_PATH,
+    maxAge: config.REFRESH_TOKEN_DAYS * 24 * 60 * 60 * 1000,
+  });
+}
+
+function clearRefreshCookie(req: Request, res: Response): void {
+  res.clearCookie(REFRESH_COOKIE, { httpOnly: true, sameSite: 'strict', secure: req.secure, path: REFRESH_COOKIE_PATH });
+}
+
+/** Extra defence against cross-site requests: browsers only let a site add this header itself. */
+function hasCsrfHeader(req: Request): boolean {
+  return req.headers['x-requested-with'] === 'fetch';
+}
 import { OAuthStateService } from '../services/oauth-state.service';
 import { AuthError, AuthService } from '../services/auth.service';
 import { loginSchema } from '../schemas/auth.schema';
@@ -29,13 +75,66 @@ export class AuthController {
         return;
       }
 
-      const { token, user } = await AuthService.login(parsed.data.email, parsed.data.password);
+      const { token, refreshToken, user } = await AuthService.login(parsed.data.email, parsed.data.password);
+      setRefreshCookie(req, res, refreshToken);
       res.status(200).json({ status: 'success', data: { token, user } });
     } catch (error) {
       if (error instanceof AuthError) {
         res.status(401).json({ status: 'error', message: error.message });
         return;
       }
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/auth/refresh
+   * Uses the refresh cookie to issue a new access token and a new refresh cookie (rotation).
+   */
+  public static async refresh(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!hasCsrfHeader(req)) {
+        res.status(400).json({ status: 'error', message: 'Invalid request.' });
+        return;
+      }
+
+      const cookie = readCookie(req, REFRESH_COOKIE);
+      if (!cookie) {
+        res.status(401).json({ status: 'error', message: 'Please sign in again.' });
+        return;
+      }
+
+      const { token, refreshToken, user } = await AuthService.refresh(cookie);
+      setRefreshCookie(req, res, refreshToken);
+      res.status(200).json({ status: 'success', data: { token, user } });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        clearRefreshCookie(req, res);
+        res.status(401).json({ status: 'error', message: error.message });
+        return;
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * POST /api/v1/auth/logout
+   * Clears the refresh cookie and signs the user out on every device (see revokeSessions).
+   */
+  public static async logout(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      if (!hasCsrfHeader(req)) {
+        res.status(400).json({ status: 'error', message: 'Invalid request.' });
+        return;
+      }
+
+      const cookie = readCookie(req, REFRESH_COOKIE);
+      if (cookie) {
+        await AuthService.revokeSessions(cookie);
+      }
+      clearRefreshCookie(req, res);
+      res.status(200).json({ status: 'success', data: null });
+    } catch (error) {
       next(error);
     }
   }

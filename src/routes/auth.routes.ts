@@ -1,12 +1,18 @@
 import { Router } from 'express';
 import { AuthController } from '../controllers/auth.controller';
 import { requireAuth, requireRole } from '../middlewares/auth.middleware';
-import { loginLimitPerAccount, loginLimitPerAddress } from '../middlewares/login-rate-limit';
+import { loginLimitPerAccount, loginLimitPerAddress, refreshLimitPerAddress } from '../middlewares/login-rate-limit';
 
 const router = Router();
 
 // Sign in with email and password. Failed attempts are rate limited.
 router.post('/login', loginLimitPerAddress, loginLimitPerAccount, AuthController.login);
+
+// Renew the access token from the refresh cookie (rotates the cookie)
+router.post('/refresh', refreshLimitPerAddress, AuthController.refresh);
+
+// Sign out: clears the cookie and ends the user's sessions on every device
+router.post('/logout', refreshLimitPerAddress, AuthController.logout);
 
 // Who am I (checks that the stored token still works)
 router.get('/me', requireAuth, AuthController.me);

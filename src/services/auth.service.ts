@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
@@ -20,6 +21,16 @@ export interface PublicUser {
 }
 
 const ISSUER = 'booking-agent';
+const REFRESH_AUDIENCE = 'refresh';
+// A session can never be renewed past this many days from the original sign-in.
+const SESSION_MAX_DAYS = 30;
+const DAY_SECONDS = 24 * 60 * 60;
+
+// Refresh tokens use their own key, derived from the secret, so an access token can never be
+// accepted as a refresh token or the other way round.
+function refreshKey(): Buffer {
+  return crypto.createHash('sha256').update(`refresh-token:${config.JWT_SECRET}`).digest();
+}
 // 12 rounds in real use. Tests use the minimum so they stay fast on a busy machine.
 const BCRYPT_ROUNDS = config.NODE_ENV === 'test' ? 4 : 12;
 
@@ -29,6 +40,12 @@ let dummyHash: Promise<string> | undefined;
 function getDummyHash(): Promise<string> {
   dummyHash ??= bcrypt.hash('not-a-real-password', BCRYPT_ROUNDS);
   return dummyHash;
+}
+
+export interface AuthResult {
+  token: string;
+  refreshToken: string;
+  user: PublicUser;
 }
 
 export class AuthError extends Error {
@@ -47,7 +64,7 @@ export class AuthService {
    * Checks an email and password. Returns the user and a signed token.
    * Throws AuthError with one fixed message for every failure.
    */
-  public static async login(email: string, password: string): Promise<{ token: string; user: PublicUser }> {
+  public static async login(email: string, password: string): Promise<AuthResult> {
     const user = await prisma.user.findFirst({
       where: { email: { equals: email, mode: 'insensitive' }, isActive: true },
     });
@@ -57,8 +74,10 @@ export class AuthService {
       throw new AuthError('Invalid email or password.');
     }
 
+    const ctx: AuthContext = { userId: user.id, tenantId: user.tenantId, role: user.role };
     return {
-      token: AuthService.signToken({ userId: user.id, tenantId: user.tenantId, role: user.role }),
+      token: AuthService.signToken(ctx),
+      refreshToken: AuthService.signRefreshToken(ctx, user.updatedAt, Math.floor(Date.now() / 1000)),
       user: {
         id: user.id,
         email: user.email,
@@ -67,6 +86,82 @@ export class AuthService {
         tenantId: user.tenantId,
       },
     };
+  }
+
+  /**
+   * A refresh token is signed with a different key and audience from an access token, so one
+   * can never be used as the other. It carries the user row's last-updated time (`uv`), so a
+   * change to the user (password reset, deactivation, logout-everywhere) makes older refresh
+   * tokens stop working. `ss` is when the session began, so renewals cannot go on forever.
+   */
+  private static signRefreshToken(ctx: AuthContext, userUpdatedAt: Date, sessionStartSeconds: number): string {
+    return jwt.sign({ tid: ctx.tenantId, uv: userUpdatedAt.getTime(), ss: sessionStartSeconds }, refreshKey(), {
+      algorithm: 'HS256',
+      issuer: ISSUER,
+      audience: REFRESH_AUDIENCE,
+      subject: ctx.userId,
+      expiresIn: config.REFRESH_TOKEN_DAYS * DAY_SECONDS,
+    });
+  }
+
+  private static readRefreshToken(token: string): { sub: string; tid: string; uv: number; ss: number } | null {
+    try {
+      const decoded = jwt.verify(token, refreshKey(), {
+        algorithms: ['HS256'],
+        issuer: ISSUER,
+        audience: REFRESH_AUDIENCE,
+      });
+      if (typeof decoded === 'string') return null;
+      const { sub, tid, uv, ss } = decoded as jwt.JwtPayload;
+      if (typeof sub !== 'string' || typeof tid !== 'string' || typeof uv !== 'number' || typeof ss !== 'number') {
+        return null;
+      }
+      return { sub, tid, uv, ss };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Trades a valid refresh token for a new access token and a new refresh token (rotation).
+   * Throws AuthError for anything that is not valid, expired, revoked or too old.
+   */
+  public static async refresh(refreshToken: string): Promise<AuthResult> {
+    const claims = AuthService.readRefreshToken(refreshToken);
+    if (!claims) throw new AuthError('Please sign in again.');
+
+    if (Date.now() - claims.ss * 1000 > SESSION_MAX_DAYS * DAY_SECONDS * 1000) {
+      throw new AuthError('Please sign in again.');
+    }
+
+    const user = await prisma.user.findFirst({
+      where: { id: claims.sub, tenantId: claims.tid, isActive: true },
+    });
+    // The user must still be active and unchanged since this token was issued.
+    if (!user || user.updatedAt.getTime() !== claims.uv) {
+      throw new AuthError('Please sign in again.');
+    }
+
+    const ctx: AuthContext = { userId: user.id, tenantId: user.tenantId, role: user.role };
+    return {
+      token: AuthService.signToken(ctx),
+      refreshToken: AuthService.signRefreshToken(ctx, user.updatedAt, claims.ss),
+      user: { id: user.id, email: user.email, name: user.name, role: user.role, tenantId: user.tenantId },
+    };
+  }
+
+  /**
+   * Logs the user out everywhere: touching the user row changes its last-updated time, so every
+   * refresh token issued before now stops working. Access tokens already issued still work until
+   * they expire (15 minutes by default). A token that is not valid does nothing.
+   */
+  public static async revokeSessions(refreshToken: string): Promise<void> {
+    const claims = AuthService.readRefreshToken(refreshToken);
+    if (!claims) return;
+    await prisma.user.updateMany({
+      where: { id: claims.sub, tenantId: claims.tid },
+      data: { updatedAt: new Date() },
+    });
   }
 
   public static signToken(ctx: AuthContext): string {
