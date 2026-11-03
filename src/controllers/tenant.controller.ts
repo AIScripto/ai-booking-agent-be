@@ -8,16 +8,25 @@ import { slotCacheService } from '../services/slot-cache.service';
 
 export class TenantController {
   /**
-   * GET /api/v1/tenant/vocabulary?tenant_id=uuid
+   * The caller's tenant from the verified login token. Sends 401 and returns null if missing.
+   * The request's own body, query and headers are never used to choose a tenant.
+   */
+  private static authTenant(req: Request, res: Response): string | null {
+    const tenantId = req.auth?.tenantId;
+    if (!tenantId) {
+      res.status(401).json({ status: 'error', message: 'Authentication required.' });
+      return null;
+    }
+    return tenantId;
+  }
+
+  /**
+   * GET /api/v1/tenant/vocabulary (the signed-in user's own tenant)
    */
   public static async getVocabulary(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const tenantId = (req.query.tenant_id as string) || (req.query.tenantId as string);
-
-      if (!tenantId) {
-        res.status(400).json({ status: 'error', message: 'tenant_id query parameter is required.' });
-        return;
-      }
+      const tenantId = TenantController.authTenant(req, res);
+      if (!tenantId) return;
 
       const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
       const vocabulary = getVocabulary(tenant?.industry || 'GENERAL');
@@ -37,16 +46,12 @@ export class TenantController {
   }
 
   /**
-   * GET /api/v1/tenant/branding?tenant_id=uuid
+   * GET /api/v1/tenant/branding (the signed-in user's own tenant)
    */
   public static async getBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const tenantId = (req.query.tenant_id as string) || (req.query.tenantId as string);
-
-      if (!tenantId) {
-        res.status(400).json({ status: 'error', message: 'tenant_id query parameter is required.' });
-        return;
-      }
+      const tenantId = TenantController.authTenant(req, res);
+      if (!tenantId) return;
 
       const tenant = await prisma.tenant.findUnique({
         where: { id: tenantId },
@@ -89,12 +94,9 @@ export class TenantController {
    */
   public static async updateBranding(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const { tenantId, industry, branding } = req.body;
-
-      if (!tenantId) {
-        res.status(400).json({ status: 'error', message: 'tenantId is required in body.' });
-        return;
-      }
+      const tenantId = TenantController.authTenant(req, res);
+      if (!tenantId) return;
+      const { industry, branding } = req.body;
 
       const parsedIndustry = industry === undefined || industry === null || industry === ''
         ? { success: true as const, data: undefined }
@@ -129,11 +131,12 @@ export class TenantController {
    */
   public static async onboardResource(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      const tenantId = (req.body.tenantId as string) || (req.query.tenant_id as string);
+      const tenantId = TenantController.authTenant(req, res);
+      if (!tenantId) return;
       const { name, email, title } = req.body;
 
-      if (!tenantId || !name || !email) {
-        res.status(400).json({ status: 'error', message: 'tenantId, name, and email are required fields.' });
+      if (!name || !email) {
+        res.status(400).json({ status: 'error', message: 'name and email are required fields.' });
         return;
       }
 
@@ -173,10 +176,18 @@ export class TenantController {
       }
 
       // Pro-level soft deletion: Mark doctor as inactive to preserve HIPAA historical records
-      await prisma.resource.update({
-        where: { id },
+      const tenantId = TenantController.authTenant(req, res);
+      if (!tenantId) return;
+
+      // Same-statement tenant filter: an admin can only offboard their own tenant's resources.
+      const result = await prisma.resource.updateMany({
+        where: { id, tenantId },
         data: { isActive: false },
       });
+      if (result.count === 0) {
+        res.status(404).json({ status: 'error', message: 'Resource not found.' });
+        return;
+      }
 
 
       // Purge slot cache so Voice AI instantly stops offering slots for offboarded doctor

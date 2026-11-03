@@ -7,14 +7,14 @@ import { z } from 'zod';
 
 export class AppointmentController {
   /**
-   * Helper to extract and validate x-tenant-id header.
+   * The caller's tenant, taken from the verified login token (set by requireAuth).
+   * The request's own headers, body and query are never used to choose a tenant.
    */
   private static getTenantId(req: Request): string {
-    const tenantId = req.headers['x-tenant-id'] || req.query.tenant_id || req.query.tenantId;
-    if (!tenantId || typeof tenantId !== 'string' || !z.string().uuid().safeParse(tenantId).success) {
-      throw new Error('Unauthorized: Invalid or missing x-tenant-id header or tenant_id query parameter.');
+    if (!req.auth?.tenantId) {
+      throw new Error('Unauthorized: authentication required.');
     }
-    return tenantId;
+    return req.auth.tenantId;
   }
 
 

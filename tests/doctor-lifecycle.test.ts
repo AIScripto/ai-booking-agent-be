@@ -1,11 +1,13 @@
 import request from 'supertest';
 import app from '../src/app';
 import { prisma } from '../src/services/db.service';
+import { createStaff, removeStaff, bearer, TestStaff } from './helpers/auth';
 
 
 describe('Doctor Onboarding & Offboarding Lifecycle Integration Tests', () => {
   const testTenantId = '9eb441c7-f788-4137-8043-d4d7c3080879';
   let createdDoctorId: string;
+  let admin: TestStaff;
 
   beforeAll(async () => {
     // Ensure test tenant exists
@@ -18,9 +20,11 @@ describe('Doctor Onboarding & Offboarding Lifecycle Integration Tests', () => {
         industry: 'HEALTHCARE',
       },
     });
+    admin = await createStaff(testTenantId, 'ADMIN');
   });
 
   afterAll(async () => {
+    await removeStaff(admin);
     if (createdDoctorId) {
       await prisma.resource.deleteMany({ where: { id: createdDoctorId } });
     }
@@ -29,8 +33,8 @@ describe('Doctor Onboarding & Offboarding Lifecycle Integration Tests', () => {
   test('POST /api/v1/tenant/resources - should onboard a new doctor successfully', async () => {
     const res = await request(app)
       .post('/api/v1/tenant/resources')
+      .set(bearer(admin))
       .send({
-        tenantId: testTenantId,
         name: 'Dr. Gregory House',
         email: 'gregory.house@testmedical.com',
         title: 'Head of Diagnostic Medicine',
@@ -47,7 +51,7 @@ describe('Doctor Onboarding & Offboarding Lifecycle Integration Tests', () => {
   test('DELETE /api/v1/tenant/resources/:id - should offboard a doctor successfully', async () => {
     expect(createdDoctorId).toBeDefined();
 
-    const res = await request(app).delete(`/api/v1/tenant/resources/${createdDoctorId}`);
+    const res = await request(app).delete(`/api/v1/tenant/resources/${createdDoctorId}`).set(bearer(admin));
 
     expect(res.status).toBe(200);
     expect(res.body.status).toBe('success');

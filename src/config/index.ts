@@ -14,6 +14,10 @@ const configSchema = z.object({
   GOOGLE_CALLBACK_URL: z.string().url(),
   GOOGLE_DEFAULT_CALENDAR_ID: z.string().default('primary'),
   WEBHOOK_API_KEY: z.string(),
+  // Signs login tokens. Use a long random value (at least 32 characters) and keep it secret.
+  JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters.'),
+  // How long a login token stays valid, for example 8h or 30m.
+  JWT_EXPIRES_IN: z.string().default('8h'),
   // Time zone used when speaking or messaging a time to a customer. Times are stored in UTC.
   // Per-tenant time zones need a schema change; until then this one applies to everyone.
   DEFAULT_TIME_ZONE: z

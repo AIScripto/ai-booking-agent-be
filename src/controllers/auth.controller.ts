@@ -4,6 +4,8 @@ import { config } from '../config';
 import { prisma } from '../services/db.service';
 import { z } from 'zod';
 import { OAuthStateService } from '../services/oauth-state.service';
+import { AuthError, AuthService } from '../services/auth.service';
+import { loginSchema } from '../schemas/auth.schema';
 
 function escapeHtml(value: unknown): string {
   return String(value)
@@ -16,8 +18,48 @@ function escapeHtml(value: unknown): string {
 
 export class AuthController {
   /**
-   * Generates the Google Calendar OAuth Consent URL for a tenant.
-   * Query Param: tenant_id (UUID)
+   * POST /api/v1/auth/login
+   * Body: { email, password }. Returns { token, user }.
+   */
+  public static async login(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const parsed = loginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({ status: 'error', message: 'A valid email and password are required.' });
+        return;
+      }
+
+      const { token, user } = await AuthService.login(parsed.data.email, parsed.data.password);
+      res.status(200).json({ status: 'success', data: { token, user } });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        res.status(401).json({ status: 'error', message: error.message });
+        return;
+      }
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/v1/auth/me
+   * Returns the signed-in user. Used by the frontend to check that a stored token still works.
+   */
+  public static async me(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const user = req.auth ? await AuthService.getPublicUser(req.auth) : null;
+      if (!user) {
+        res.status(401).json({ status: 'error', message: 'Authentication required.' });
+        return;
+      }
+      res.status(200).json({ status: 'success', data: user });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * Generates the Google Calendar OAuth Consent URL for the signed-in admin's own tenant.
+   * The tenant comes from the verified login token, never from the request.
    */
   public static async getAuthUrl(
     req: Request,
@@ -25,12 +67,9 @@ export class AuthController {
     next: NextFunction
   ): Promise<void> {
     try {
-      const tenantId = req.query.tenant_id as string;
-      if (!tenantId || !z.string().uuid().safeParse(tenantId).success) {
-        res.status(400).json({
-          status: 'error',
-          message: 'A valid tenant_id query parameter is required.',
-        });
+      const tenantId = req.auth?.tenantId;
+      if (!tenantId) {
+        res.status(401).json({ status: 'error', message: 'Authentication required.' });
         return;
       }
 

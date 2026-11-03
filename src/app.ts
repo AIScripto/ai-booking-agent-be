@@ -7,6 +7,10 @@ import { errorMiddleware } from './middlewares/error.middleware';
 
 const app = express();
 
+// The frontend nginx sits in front of this app. Trust one proxy hop so req.ip is the real
+// client address (needed for the login rate limits), not nginx's address.
+app.set('trust proxy', 1);
+
 // Standard middleware stack
 app.use(helmet());
 app.use(cors());
