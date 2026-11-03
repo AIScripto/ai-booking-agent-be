@@ -232,25 +232,63 @@ export class AppointmentService {
       });
       console.log(`[AppointmentService.bgSyncGoogleCalendar] Successfully synced appointment ${appointmentId} to Google Calendar.`);
 
-      // Trigger Omnichannel Notifications (SMS/WhatsApp & Email with .ics file)
-      const dateTimeStr = details.start.toLocaleString();
-      const smsBody = SmsService.formatConfirmationText(details.customerName, 'Consultation', dateTimeStr);
-      SmsService.sendConfirmation({ to: details.customerPhone, body: smsBody }).catch((e) => console.error('[AppointmentService] SMS Error:', e));
-
-      if (details.customerEmail) {
-        EmailService.sendAppointmentConfirmation({
-          to: details.customerEmail,
-          subject: 'Appointment Confirmation & iCalendar Invite',
-          customerName: details.customerName,
-          serviceName: 'Consultation',
-          appointmentDateTime: details.start,
-        }).catch((e) => console.error('[AppointmentService] Email Error:', e));
-      }
     } catch (gcalError) {
 
       console.error(`[AppointmentService.bgSyncGoogleCalendar] Failed to sync appointment ${appointmentId} to Google Calendar:`, gcalError);
       // We do NOT roll back the database reservation. The booking remains in the local DB.
     }
+
+    // Confirmations do not depend on the calendar: a failed sync must not silence them.
+    await this.sendConfirmations(appointmentId, details);
+  }
+
+  /**
+   * Sends the SMS and email confirmations and logs what really happened.
+   * Each channel is separate: one failing never stops the other. Never throws.
+   * Logs carry the appointment id only, never names, phone numbers or emails.
+   */
+  private static async sendConfirmations(
+    appointmentId: string,
+    details: {
+      customerName: string;
+      customerPhone: string;
+      customerEmail?: string | null;
+      start: Date;
+    }
+  ): Promise<void> {
+    const dateTimeStr = details.start.toLocaleString();
+    const smsBody = SmsService.formatConfirmationText(details.customerName, 'Consultation', dateTimeStr);
+
+    const channels: Array<{ name: string; send: () => Promise<{ status: string; reason?: string }> }> = [
+      { name: 'SMS', send: () => SmsService.sendConfirmation({ to: details.customerPhone, body: smsBody }) },
+    ];
+    if (details.customerEmail) {
+      const to = details.customerEmail;
+      channels.push({
+        name: 'email',
+        send: () =>
+          EmailService.sendAppointmentConfirmation({
+            to,
+            subject: 'Appointment Confirmation & iCalendar Invite',
+            customerName: details.customerName,
+            serviceName: 'Consultation',
+            appointmentDateTime: details.start,
+          }),
+      });
+    }
+
+    const results = await Promise.allSettled(channels.map((c) => c.send()));
+    results.forEach((result, i) => {
+      const name = channels[i].name;
+      if (result.status === 'rejected') {
+        console.error(`[AppointmentService] Confirmation ${name} failed for appointment ${appointmentId}.`);
+      } else {
+        const { status, reason } = result.value;
+        console.log(
+          `[AppointmentService] Confirmation ${name} for appointment ${appointmentId}: ${status}${reason ? ` (${reason})` : ''}`
+        );
+      }
+    });
   }
 
   /**

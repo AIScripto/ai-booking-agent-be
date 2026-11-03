@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
 import { SmsService } from '../src/services/sms.service';
 import { EmailService } from '../src/services/email.service';
 import { TelehealthService, TelehealthUnavailableError } from '../src/services/telehealth.service';
-import { PaymentService } from '../src/services/payment.service';
+import { PaymentService, PaymentUnavailableError } from '../src/services/payment.service';
 
 describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () => {
   describe('SmsService', () => {
@@ -13,13 +13,28 @@ describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () 
       expect(text).toContain('2026-08-12 at 10:30 AM');
     });
 
-    it('should dispatch mock SMS confirmation cleanly', async () => {
-      const result = await SmsService.sendConfirmation({
-        to: '+15550199',
-        body: 'Your appointment is confirmed.',
+    describe('sendConfirmation (SMS is not live)', () => {
+      const saved = process.env.TWILIO_ACCOUNT_SID;
+      afterEach(() => {
+        if (saved === undefined) delete process.env.TWILIO_ACCOUNT_SID;
+        else process.env.TWILIO_ACCOUNT_SID = saved;
       });
-      expect(result.success).toBe(true);
-      expect(result.sid).toContain('SM_mock_');
+
+      it('reports disabled, not success, when Twilio is not configured', async () => {
+        delete process.env.TWILIO_ACCOUNT_SID;
+        const result = await SmsService.sendConfirmation({ to: '+15550199', body: 'Your appointment is confirmed.' });
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('disabled');
+        expect(result.sid).toBe('');
+      });
+
+      it('reports failed, not success, when settings exist but live sending is not built', async () => {
+        process.env.TWILIO_ACCOUNT_SID = 'AC_test_value';
+        const result = await SmsService.sendConfirmation({ to: '+15550199', body: 'Your appointment is confirmed.' });
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+        expect(result.sid).toBe('');
+      });
     });
   });
 
@@ -39,16 +54,34 @@ describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () 
       expect(ics).toContain('SUMMARY:General Consultation with Dr. Sarah Jenkins');
     });
 
-    it('should dispatch mock email confirmation cleanly', async () => {
-      const result = await EmailService.sendAppointmentConfirmation({
+    describe('sendAppointmentConfirmation (email is not live)', () => {
+      const saved = process.env.SENDGRID_API_KEY;
+      const payload = {
         to: 'michael@example.com',
         subject: 'Confirmation',
         customerName: 'Michael Scott',
         serviceName: 'General Consultation',
         appointmentDateTime: new Date('2026-08-12T10:30:00Z'),
+      };
+      afterEach(() => {
+        if (saved === undefined) delete process.env.SENDGRID_API_KEY;
+        else process.env.SENDGRID_API_KEY = saved;
       });
-      expect(result.success).toBe(true);
-      expect(result.messageId).toContain('msg_mock_');
+
+      it('reports disabled, not success, when SendGrid is not configured', async () => {
+        delete process.env.SENDGRID_API_KEY;
+        const result = await EmailService.sendAppointmentConfirmation(payload);
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('disabled');
+        expect(result.messageId).toBe('');
+      });
+
+      it('reports failed, not success, when a key exists but live sending is not built', async () => {
+        process.env.SENDGRID_API_KEY = 'SG.test_value';
+        const result = await EmailService.sendAppointmentConfirmation(payload);
+        expect(result.success).toBe(false);
+        expect(result.status).toBe('failed');
+      });
     });
   });
 
@@ -149,14 +182,21 @@ describe('Phase 5 Omnichannel Notifications, Telehealth & Payment Services', () 
   });
 
   describe('PaymentService', () => {
-    it('should generate Stripe PaymentIntent client secret', async () => {
-      const payment = await PaymentService.createPaymentIntent({
-        amountCents: 5000,
-        currency: 'usd',
-        customerEmail: 'michael@example.com',
-      });
-      expect(payment.clientSecret).toBeDefined();
-      expect(payment.status).toBe('requires_payment_method');
+    const saved = process.env.STRIPE_SECRET_KEY;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.STRIPE_SECRET_KEY;
+      else process.env.STRIPE_SECRET_KEY = saved;
+    });
+    const request = { amountCents: 5000, currency: 'usd', customerEmail: 'michael@example.com' };
+
+    it('never returns a made-up PaymentIntent when Stripe is not configured', async () => {
+      delete process.env.STRIPE_SECRET_KEY;
+      await expect(PaymentService.createPaymentIntent(request)).rejects.toBeInstanceOf(PaymentUnavailableError);
+    });
+
+    it('never returns a made-up PaymentIntent when a key exists but live Stripe is not built', async () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_value';
+      await expect(PaymentService.createPaymentIntent(request)).rejects.toBeInstanceOf(PaymentUnavailableError);
     });
   });
 });

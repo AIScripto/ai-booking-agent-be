@@ -1,38 +1,41 @@
+import type { NotificationStatus } from './notification.types';
+
 export interface SmsPayload {
   to: string;
   body: string;
   isWhatsApp?: boolean;
 }
 
+export interface SmsResult {
+  success: boolean;
+  sid: string;
+  status: NotificationStatus;
+  reason?: string;
+}
+
 export class SmsService {
-  private static accountSid = process.env.TWILIO_ACCOUNT_SID;
-  private static authToken = process.env.TWILIO_AUTH_TOKEN;
-  private static fromPhone = process.env.TWILIO_PHONE_NUMBER || '+15550001111';
-  private static fromWhatsApp = process.env.TWILIO_WHATSAPP_NUMBER || 'whatsapp:+15550001111';
+  // Read at call time (not import time) so a change of environment is honoured and tests are repeatable.
+  private static get accountSid(): string | undefined {
+    return process.env.TWILIO_ACCOUNT_SID;
+  }
 
   /**
-   * Sends instant SMS or WhatsApp confirmation message to patient/client.
+   * Sends an SMS or WhatsApp confirmation to the customer.
+   *
+   * SMS is not live yet. Without Twilio settings this returns `disabled`, and
+   * nothing is sent. With settings present, live sending is not built, so it
+   * returns `failed` instead of pretending it worked.
    */
-  public static async sendConfirmation(payload: SmsPayload): Promise<{ success: boolean; sid: string }> {
-    console.log(`[SmsService] Sending ${payload.isWhatsApp ? 'WhatsApp' : 'SMS'} message`);
+  public static async sendConfirmation(payload: SmsPayload): Promise<SmsResult> {
+    const channel = payload.isWhatsApp ? 'WhatsApp' : 'SMS';
 
-    // Mock resilient execution if live Twilio credentials are missing in local dev
     if (!this.accountSid || this.accountSid.startsWith('ACxxxx')) {
-      console.log('[SmsService] Twilio credentials unconfigured. Mock SMS dispatched cleanly.');
-      return { success: true, sid: `SM_mock_${Date.now()}` };
+      console.log(`[SmsService] ${channel} not sent: Twilio is not configured.`);
+      return { success: false, sid: '', status: 'disabled', reason: 'Twilio is not configured.' };
     }
 
-    try {
-      // Live Twilio API dispatch logic
-      const from = payload.isWhatsApp ? this.fromWhatsApp : this.fromPhone;
-      const to = payload.isWhatsApp && !payload.to.startsWith('whatsapp:') ? `whatsapp:${payload.to}` : payload.to;
-
-      console.log('[SmsService.live] Dispatching message');
-      return { success: true, sid: `SM_live_${Date.now()}` };
-    } catch (error) {
-      console.error('[SmsService] Failed to send SMS:', error);
-      return { success: false, sid: '' };
-    }
+    console.error(`[SmsService] ${channel} not sent: live Twilio sending is not implemented.`);
+    return { success: false, sid: '', status: 'failed', reason: 'Live Twilio sending is not implemented.' };
   }
 
   /**

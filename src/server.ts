@@ -42,3 +42,9 @@ const shutdown = async (signal: string) => {
 
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
+
+// A background promise that fails without a .catch() would otherwise be silent or kill a live call.
+// Log it with its reason so it can be found and fixed.
+process.on('unhandledRejection', (reason) => {
+  console.error('[Process] Unhandled promise rejection:', reason instanceof Error ? reason.stack || reason.message : reason);
+});

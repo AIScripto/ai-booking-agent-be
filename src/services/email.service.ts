@@ -1,3 +1,12 @@
+import type { NotificationStatus } from './notification.types';
+
+export interface EmailResult {
+  success: boolean;
+  messageId: string;
+  status: NotificationStatus;
+  reason?: string;
+}
+
 export interface EmailPayload {
   to: string;
   subject: string;
@@ -9,9 +18,10 @@ export interface EmailPayload {
 }
 
 export class EmailService {
-  private static apiKey = process.env.SENDGRID_API_KEY;
-  private static fromEmail = process.env.SENDGRID_FROM_EMAIL || 'notifications@citycaremedical.com';
-  private static fromName = process.env.SENDGRID_FROM_NAME || 'City Care Appointments';
+  // Read at call time (not import time) so a change of environment is honoured and tests are repeatable.
+  private static get apiKey(): string | undefined {
+    return process.env.SENDGRID_API_KEY;
+  }
 
   /**
    * Generates standard RFC 5545 iCalendar (.ics) string for calendar import.
@@ -41,25 +51,19 @@ export class EmailService {
   }
 
   /**
-   * Dispatches email with optional .ics calendar attachment.
+   * Sends the appointment confirmation email.
+   *
+   * Email is not live yet. Without a SendGrid key this returns `disabled`, and
+   * nothing is sent. With a key present, live sending is not built, so it
+   * returns `failed` instead of pretending it worked.
    */
-  public static async sendAppointmentConfirmation(payload: EmailPayload): Promise<{ success: boolean; messageId: string }> {
-    console.log('[EmailService] Preparing confirmation email');
-
-    const icsContent = this.generateIcsContent(payload);
-    console.log(`[EmailService] Generated .ics iCalendar file attachment (${icsContent.length} bytes)`);
-
+  public static async sendAppointmentConfirmation(_payload: EmailPayload): Promise<EmailResult> {
     if (!this.apiKey || this.apiKey.startsWith('SG.xxxx')) {
-      console.log('[EmailService] SendGrid API Key unconfigured. Mock email dispatched cleanly.');
-      return { success: true, messageId: `msg_mock_${Date.now()}` };
+      console.log('[EmailService] Email not sent: SendGrid is not configured.');
+      return { success: false, messageId: '', status: 'disabled', reason: 'SendGrid is not configured.' };
     }
 
-    try {
-      console.log('[EmailService.live] Dispatching email');
-      return { success: true, messageId: `msg_live_${Date.now()}` };
-    } catch (error) {
-      console.error('[EmailService] Failed to dispatch email:', error);
-      return { success: false, messageId: '' };
-    }
+    console.error('[EmailService] Email not sent: live SendGrid sending is not implemented.');
+    return { success: false, messageId: '', status: 'failed', reason: 'Live SendGrid sending is not implemented.' };
   }
 }
