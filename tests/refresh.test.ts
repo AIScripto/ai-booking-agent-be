@@ -27,7 +27,12 @@ describe('Refresh tokens (SEC-012)', () => {
       .set('X-Forwarded-For', freshIp())
       .set(extra)
       .send({ email: staff.email, password: staff.password });
-    expect(res.status).toBe(200);
+    if (res.status !== 200) {
+      throw new Error(
+        `Login for ${staff.email} returned ${res.status}. body=${JSON.stringify(res.body)} text=${JSON.stringify(res.text)} ` +
+          `type=${res.type} headers=${JSON.stringify(res.headers)}`
+      );
+    }
     const setCookie = (res.headers['set-cookie'] as unknown as string[] | undefined) ?? [];
     const raw = setCookie.find((c) => c.startsWith('refresh_token='));
     return { res, raw, cookie: raw ? raw.split(';')[0] : '', access: res.body.data.token as string };

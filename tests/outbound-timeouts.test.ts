@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, jest } from '@jest/globals';
 import request from 'supertest';
 
+jest.mock('../src/services/google-calendar.service');
+
 // Short deadlines so the tests run in milliseconds.
 jest.mock('../src/config/timeouts', () => ({
   TIMEOUTS: { VOICE_CALL_MS: 50, BACKGROUND_CALL_MS: 80, NEXT_SLOT_SEARCH_MS: 120 },
@@ -9,6 +11,7 @@ jest.mock('../src/config/timeouts', () => ({
 import { calComService } from '../src/services/calcom.service';
 import { slotCacheService } from '../src/services/slot-cache.service';
 import { AppointmentService } from '../src/services/appointment.service';
+import { GoogleCalendarService } from '../src/services/google-calendar.service';
 const app = require('../src/app').default || require('../src/app');
 
 /** A fetch that never answers; it only ends when the caller's AbortSignal fires. */
@@ -36,13 +39,13 @@ describe('Outbound call deadlines (REL-001)', () => {
     expect(fetchSpy.mock.calls[0][1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
-  it('the voice availability endpoint answers with a spoken fallback when Cal.com stalls', async () => {
-    stalledFetch();
+  it('the voice availability endpoint answers quickly with a spoken fallback when Google cannot be read', async () => {
+    jest.mocked(GoogleCalendarService.getBusyIntervals).mockResolvedValue(null);
     const started = Date.now();
 
     const res = await request(app)
       .get('/api/v1/voice/check-availability')
-      .query({ tenant_id: '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f0e01', username: 'dr-x', date: '2026-08-11' });
+      .query({ tenant_id: '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f0e01', date: '2031-08-12', timeZone: 'America/New_York' });
 
     expect(Date.now() - started).toBeLessThan(1000);
     expect(res.status).toBe(200);

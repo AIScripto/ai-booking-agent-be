@@ -1,7 +1,8 @@
 import { AppointmentService } from './appointment.service';
 import { prisma } from './db.service';
 import { TRANSACTION_OPTIONS } from '../config/timeouts';
-import { calComService } from './calcom.service';
+import { AvailabilityService, AvailabilityUnavailableError, todayIn } from './availability.service';
+import { config } from '../config';
 import { slotCacheService, SlotCacheService } from './slot-cache.service';
 
 
@@ -10,6 +11,9 @@ export interface ToolCallInput {
   arguments: any;
   toolCallId: string;
 }
+
+/** The agent reads times aloud, so a long list is not helpful. */
+const MAX_SPOKEN_SLOTS = 6;
 
 export class VoiceService {
 
@@ -302,77 +306,76 @@ export class VoiceService {
   }
 
   /**
-   * Fast availability slot check for Voice AI Agent (<50ms target)
+   * Free appointment times for one date, for the voice agent to read out.
+   *
+   * One source of truth (decision D3): the local appointments table plus Google Calendar, the same
+   * places a booking is checked against, so every time offered here can be booked. Cal.com is not
+   * asked. If the calendar cannot be read the answer says so; times are never guessed.
+   *
+   * `availableSlots` are the spoken labels and `availableSlotsIso` the same times in UTC, in the same
+   * order, for the agent to pass to bookAppointment. At most MAX_SPOKEN_SLOTS are returned.
    */
-  public static async checkCalComAvailability(
-    tenantId?: string,
-    username: string = 'dr-sarah-jenkins',
+  public static async checkAvailabilitySlots(
+    tenantId: string,
+    calendarId: string,
     date?: string,
-    timeZone: string = 'America/New_York'
-  ): Promise<{ responseText: string; availableSlots: string[]; executionTimeMs: number; cached?: boolean }> {
+    timeZone: string = config.DEFAULT_TIME_ZONE
+  ): Promise<{
+    responseText: string;
+    availableSlots: string[];
+    availableSlotsIso: string[];
+    totalFree: number;
+    executionTimeMs: number;
+    cached?: boolean;
+  }> {
     const startTime = Date.now();
-    const targetDate = date || new Date().toISOString().split('T')[0];
-    const cacheKey = SlotCacheService.buildKey(tenantId || 'no-tenant', username, targetDate, timeZone);
+    const targetDate = date || todayIn(timeZone);
+    const cacheKey = SlotCacheService.buildKey(tenantId, calendarId, targetDate, timeZone);
 
-    // 1. Check ultra-fast slot cache (<5ms)
-    const cachedResult = slotCacheService.get<{ responseText: string; availableSlots: string[] }>(cacheKey);
+    type Answer = Omit<Awaited<ReturnType<typeof VoiceService.checkAvailabilitySlots>>, 'executionTimeMs' | 'cached'>;
+    const cachedResult = slotCacheService.get<Answer>(cacheKey);
     if (cachedResult) {
-      const executionTimeMs = Date.now() - startTime;
-      console.log(`⚡ [SlotCacheService] Cache HIT for key '${cacheKey}' in ${executionTimeMs}ms`);
-      return {
-        ...cachedResult,
-        executionTimeMs,
-        cached: true,
-      };
+      return { ...cachedResult, executionTimeMs: Date.now() - startTime, cached: true };
     }
 
     try {
-      const slotsData = (await calComService.getAvailableSlots({
-        username,
-        startTime: `${targetDate}T00:00:00Z`,
-        endTime: `${targetDate}T23:59:59Z`,
-        timeZone,
-      })) as any;
+      const { closed, slots } = await AvailabilityService.getFreeSlots(tenantId, calendarId, targetDate, timeZone);
 
-      // Never invent slots. If Cal.com has none for the day, say so.
-      const slots: Array<{ time: string }> = slotsData?.data?.slots?.[targetDate] || [];
+      const spoken = slots.slice(0, MAX_SPOKEN_SLOTS);
+      const labels = spoken.map((slot) =>
+        slot.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone })
+      );
 
-      const formattedTimes = slots.map((s) => {
-        const timeObj = new Date(s.time);
-        return timeObj.toLocaleTimeString('en-US', {
-          hour: 'numeric',
-          minute: '2-digit',
-          hour12: true,
-          timeZone,
-        });
-      });
+      let responseText: string;
+      if (closed) {
+        responseText = `We are closed on ${targetDate}. Would you like to try another day?`;
+      } else if (slots.length === 0) {
+        responseText = `There are no available appointment slots on ${targetDate}. Would you like to try another day?`;
+      } else {
+        const more = slots.length > spoken.length ? ` There are ${slots.length - spoken.length} more times if none of these suit you.` : '';
+        responseText = `Available appointment slots for ${targetDate} are at ${labels.join(', ')}.${more} Which time works best for you?`;
+      }
 
-      const responseText = formattedTimes.length > 0
-        ? `Available appointment slots for ${targetDate} are at ${formattedTimes.join(', ')}. Which time works best for you?`
-        : `There are no available appointment slots on ${targetDate}. Would you like to try another day?`;
-      const executionTimeMs = Date.now() - startTime;
-
-      const result = {
+      const answer: Answer = {
         responseText,
-        availableSlots: formattedTimes,
+        availableSlots: labels,
+        availableSlotsIso: spoken.map((slot) => slot.toISOString()),
+        totalFree: slots.length,
       };
-
-      // Store in cache with 30-second TTL
-      slotCacheService.set(cacheKey, result, 30);
-
-      return {
-        ...result,
-        executionTimeMs,
-        cached: false,
-      };
+      slotCacheService.set(cacheKey, answer, 30);
+      return { ...answer, executionTimeMs: Date.now() - startTime, cached: false };
     } catch (error) {
       // Do not offer made-up slots: a caller could book a time that does not exist.
-      console.warn('[VoiceService] CalCom availability lookup failed:', error);
-      const executionTimeMs = Date.now() - startTime;
+      if (!(error instanceof AvailabilityUnavailableError)) {
+        console.warn('[VoiceService] Availability lookup failed:', error);
+      }
       return {
-        responseText: 'I am unable to check the calendar right now. Please try again in a moment, or I can take your details and have someone call you back.',
+        responseText:
+          'I am unable to check the calendar right now. Please try again in a moment, or I can take your details and have someone call you back.',
         availableSlots: [],
-        executionTimeMs,
+        availableSlotsIso: [],
+        totalFree: 0,
+        executionTimeMs: Date.now() - startTime,
         cached: false,
       };
     }

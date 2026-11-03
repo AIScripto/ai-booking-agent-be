@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { config } from '../config';
+import { isRealDate } from '../services/availability.service';
 
 export const webhookQuerySchema = z.object({
   tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }),
@@ -26,9 +27,14 @@ export const webhookPayloadSchema = z.object({
 });
 
 export const checkAvailabilitySchema = z.object({
-  tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }).optional(),
-  username: z.string().optional().default('dr-sarah-jenkins'),
-  date: z.string().optional(),
+  // Required: the answer comes from this tenant's own appointments and calendar.
+  tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }),
+  // The calendar to check. Defaults to the same default calendar the webhook uses.
+  calendar_id: z.string().min(1).optional().default(config.GOOGLE_DEFAULT_CALENDAR_ID),
+  date: z
+    .string()
+    .optional()
+    .refine((d) => d === undefined || isRealDate(d), { message: 'date must be a real date written YYYY-MM-DD.' }),
   timeZone: z
     .string()
     .optional()

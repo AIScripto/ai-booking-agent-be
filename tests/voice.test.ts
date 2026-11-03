@@ -21,23 +21,27 @@ describe('Voice Webhook Endpoints Integration Tests', () => {
   const apiKey = require('../src/config').config.WEBHOOK_API_KEY;
 
 
+  // This suite has its own tenant. It used to take "the first tenant in the database", which in a
+  // shared test database could be another suite's tenant, and its cleanup then deleted that
+  // suite's appointments and call logs while it was still running.
+  const ownTenantId = '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f1801';
+
   beforeAll(async () => {
-    // Retrieve default seed tenant, or create one if missing
-    const tenant = await prisma.tenant.findFirst();
-    if (tenant) {
-      tenantId = tenant.id;
-    } else {
-      const newTenant = await prisma.tenant.create({
-        data: { name: 'Test Integration Tenant' },
-      });
-      tenantId = newTenant.id;
-    }
+    await prisma.tenant.upsert({
+      where: { id: ownTenantId },
+      update: {},
+      create: { id: ownTenantId, name: 'Voice Test Tenant', industry: 'HEALTHCARE' },
+    });
+    tenantId = ownTenantId;
+    await prisma.callLog.deleteMany({ where: { tenantId } });
+    await prisma.appointment.deleteMany({ where: { tenantId } });
   });
 
   afterAll(async () => {
-    // Cleanup mock bookings/logs and release Prisma DB client connections
+    // Remove only this suite's own data, then release the database connections.
     await prisma.callLog.deleteMany({ where: { tenantId } });
     await prisma.appointment.deleteMany({ where: { tenantId } });
+    await prisma.tenant.deleteMany({ where: { id: ownTenantId } });
     await prisma.$disconnect();
   });
 

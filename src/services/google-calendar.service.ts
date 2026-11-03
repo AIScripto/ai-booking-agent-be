@@ -134,6 +134,53 @@ export class GoogleCalendarService {
   }
 
   /**
+   * The busy time in a calendar between two instants, for working out which slots are free.
+   * Returns null when the calendar cannot be read (the caller must not guess). In mock mode (no
+   * Google credentials) there is nothing to read, so it returns an empty list.
+   * Cancelled events and events marked "free" do not count. An all-day event blocks its whole day.
+   */
+  public static async getBusyIntervals(
+    tenantId: string,
+    calendarId: string,
+    timeMin: Date,
+    timeMax: Date
+  ): Promise<Array<{ start: Date; end: Date }> | null> {
+    try {
+      if (await this.isMock(tenantId)) {
+        return [];
+      }
+
+      const calendar = await this.getCalendarClient(tenantId);
+      const response = await calendar.events.list(
+        {
+          calendarId,
+          timeMin: timeMin.toISOString(),
+          timeMax: timeMax.toISOString(),
+          singleEvents: true,
+          orderBy: 'startTime',
+          maxResults: 250,
+        },
+        { timeout: TIMEOUTS.VOICE_CALL_MS }
+      );
+
+      const busy: Array<{ start: Date; end: Date }> = [];
+      for (const event of response.data.items || []) {
+        if (event.status === 'cancelled' || event.transparency === 'transparent') continue;
+        const startText = event.start?.dateTime || event.start?.date;
+        const endText = event.end?.dateTime || event.end?.date;
+        if (!startText || !endText) continue;
+        const start = new Date(startText);
+        const end = new Date(endText);
+        if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) busy.push({ start, end });
+      }
+      return busy;
+    } catch (error) {
+      console.error(`[GoogleCalendarService.getBusyIntervals] Could not read calendar ${calendarId} for tenant ${tenantId}:`, error);
+      return null;
+    }
+  }
+
+  /**
    * Creates an event in Google Calendar.
    * @param tenantId The isolation boundary tenant ID
    * @param calendarId The target calendar

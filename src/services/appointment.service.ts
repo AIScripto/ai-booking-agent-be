@@ -4,12 +4,13 @@ import { SmsService } from './sms.service';
 import { EmailService } from './email.service';
 import { TIMEOUTS, TRANSACTION_OPTIONS } from '../config/timeouts';
 import { config } from '../config';
+import { slotCacheService } from './slot-cache.service';
 
 /**
  * Every booking is this long. The Appointment table does not store a duration, so an
  * existing appointment is assumed to last this many minutes when checking for overlaps.
  */
-const SLOT_MINUTES = 30;
+export const SLOT_MINUTES = 30;
 
 /**
  * A booking may be at most this far in the past. Requests take time to arrive and clocks drift,
@@ -279,6 +280,9 @@ export class AppointmentService {
       console.error(`[AppointmentService.createAppointment] Triggering background sync failed for appointment ${appointment.id}:`, bgError);
     });
 
+    // A booked time must not keep being offered from the 30 second slot cache.
+    slotCacheService.invalidate(`slots:${tenantId}:`);
+
     return appointment;
   }
 
@@ -449,5 +453,8 @@ export class AppointmentService {
         status: 'CANCELLED',
       },
     });
+
+    // The freed time can be offered again at once.
+    slotCacheService.invalidate(`slots:${tenantId}:`);
   }
 }

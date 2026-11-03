@@ -26,6 +26,12 @@ const configSchema = z.object({
   DB_CONNECT_TIMEOUT_SECONDS: z.coerce.number().int().min(1).max(120).default(15),
   // Connections opened at start-up so the first users do not pay for opening them.
   DB_WARM_CONNECTIONS: z.coerce.number().int().min(0).max(50).default(5),
+  // When appointments can be offered. Times are in the time zone of the request (DEFAULT_TIME_ZONE
+  // unless the caller says otherwise). Days: 0 = Sunday ... 6 = Saturday. Per-tenant or per-provider
+  // hours need a schema change and are not supported yet.
+  BUSINESS_HOURS_START: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM, for example 09:00.').default('09:00'),
+  BUSINESS_HOURS_END: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:MM, for example 17:00.').default('17:00'),
+  BUSINESS_DAYS: z.string().regex(/^[0-6](,[0-6])*$/, 'Use digits 0-6 separated by commas, for example 1,2,3,4,5.').default('1,2,3,4,5'),
   // How many seconds the server remembers that a user is active (saves a database round trip per
   // request). A deactivated user keeps access for at most this long. 0 turns it off.
   AUTH_CACHE_SECONDS: z.coerce.number().int().min(0).max(60).default(10),

@@ -202,7 +202,9 @@ describe('Authentication and tenant isolation (SEC-012)', () => {
       expect((await request(app).get('/health')).status).toBe(200);
       // No API key: the webhook answers 401 from its own key check, not from the login middleware.
       const res = await request(app).post('/api/v1/voice/webhook?tenant_id=' + tenantA).send({});
-      expect([200, 400, 401]).toContain(res.status);
+      if (![200, 400, 401].includes(res.status)) {
+        throw new Error(`Unexpected status ${res.status} from the voice webhook: ${JSON.stringify(res.body)}`);
+      }
       expect(res.body.message ?? '').not.toBe('Authentication required.');
     });
   });

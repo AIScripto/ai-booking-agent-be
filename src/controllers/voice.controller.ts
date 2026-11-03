@@ -77,8 +77,8 @@ export class VoiceController {
         return;
       }
 
-      const { tenant_id, username, date, timeZone } = validation.data;
-      const result = await VoiceService.checkCalComAvailability(tenant_id, username, date, timeZone);
+      const { tenant_id, calendar_id, date, timeZone } = validation.data;
+      const result = await VoiceService.checkAvailabilitySlots(tenant_id, calendar_id, date, timeZone);
 
       res.status(200).json({
         status: 'success',
