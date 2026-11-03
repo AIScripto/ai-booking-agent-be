@@ -10,8 +10,14 @@ describe('SlotCacheService Unit Tests', () => {
 
   describe('buildKey', () => {
     it('should generate consistent cache keys', () => {
-      const key = SlotCacheService.buildKey('dr-smith', '2026-08-11', 'America/New_York');
-      expect(key).toBe('slots:dr-smith:2026-08-11:America/New_York');
+      const key = SlotCacheService.buildKey('tenant-a', 'dr-smith', '2026-08-11', 'America/New_York');
+      expect(key).toBe('slots:tenant-a:dr-smith:2026-08-11:America/New_York');
+    });
+
+    it('should give different keys to two tenants with the same username (DAT-004)', () => {
+      const a = SlotCacheService.buildKey('tenant-a', 'dr-smith', '2026-08-11', 'America/New_York');
+      const b = SlotCacheService.buildKey('tenant-b', 'dr-smith', '2026-08-11', 'America/New_York');
+      expect(a).not.toBe(b);
     });
   });
 

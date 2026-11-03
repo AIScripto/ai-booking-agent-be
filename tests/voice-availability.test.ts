@@ -1,43 +1,92 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, beforeEach, jest } from '@jest/globals';
 import request from 'supertest';
+import { calComService } from '../src/services/calcom.service';
+import { slotCacheService } from '../src/services/slot-cache.service';
 const app = require('../src/app').default || require('../src/app');
 
+const tenantA = '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f0c01';
+const tenantB = '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f0c02';
+const date = '2026-08-11';
+
 describe('Voice AI Availability Check Endpoint Integration Tests', () => {
-  describe('GET & POST /api/v1/voice/check-availability', () => {
-    it('should return available slots formatted for Voice AI response speech in <50ms', async () => {
-      const startTime = Date.now();
+  let getSlots: jest.SpiedFunction<typeof calComService.getAvailableSlots>;
 
-      const response = await request(app)
-        .get('/api/v1/voice/check-availability')
-        .query({
-          username: 'dr-sarah-jenkins',
-          date: '2026-08-11',
-          timeZone: 'America/New_York',
-        });
+  beforeEach(() => {
+    slotCacheService.invalidate();
+    getSlots = jest.spyOn(calComService, 'getAvailableSlots');
+  });
 
-      const responseTimeMs = Date.now() - startTime;
+  it('returns real slots, spoken in the requested time zone', async () => {
+    // 14:00 UTC is 10:00 AM in New York (EDT) in August.
+    getSlots.mockResolvedValue({ data: { slots: { [date]: [{ time: `${date}T14:00:00Z` }] } } } as never);
 
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.responseText).toContain('Available appointment slots for 2026-08-11');
-      expect(Array.isArray(response.body.data.availableSlots)).toBe(true);
-      expect(response.body.data.availableSlots.length).toBeGreaterThan(0);
+    const res = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantA, username: 'dr-x', date, timeZone: 'America/New_York' });
 
-      console.log(`⏱️ Voice Availability Check Response Time: ${responseTimeMs}ms`);
-    });
+    expect(res.status).toBe(200);
+    expect(res.body.data.availableSlots).toEqual(['10:00 AM']);
+    expect(res.body.data.responseText).toContain('10:00 AM');
+  });
 
-    it('should handle POST body payload for Voice AI custom tool calls', async () => {
-      const response = await request(app)
-        .post('/api/v1/voice/check-availability')
-        .send({
-          username: 'dr-sarah-jenkins',
-          date: '2026-08-11',
-          timeZone: 'America/New_York',
-        });
+  it('supports POST bodies for Voice AI custom tool calls', async () => {
+    getSlots.mockResolvedValue({ data: { slots: { [date]: [{ time: `${date}T14:00:00Z` }] } } } as never);
 
-      expect(response.status).toBe(200);
-      expect(response.body.status).toBe('success');
-      expect(response.body.data.availableSlots).toBeDefined();
-    });
+    const res = await request(app)
+      .post('/api/v1/voice/check-availability')
+      .send({ tenant_id: tenantA, username: 'dr-x', date, timeZone: 'America/New_York' });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.availableSlots).toHaveLength(1);
+  });
+
+  it('says there are no slots instead of inventing them', async () => {
+    getSlots.mockResolvedValue({ data: { slots: {} } } as never);
+
+    const res = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantA, username: 'dr-x', date });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.availableSlots).toEqual([]);
+    expect(res.body.data.responseText).toContain('no available appointment slots');
+  });
+
+  it('does not offer made-up slots when Cal.com fails, and does not cache the failure', async () => {
+    getSlots.mockRejectedValue(new Error('Cal.com down') as never);
+
+    const res = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantA, username: 'dr-x', date });
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.availableSlots).toEqual([]);
+    expect(res.body.data.responseText).toContain('unable to check the calendar');
+
+    getSlots.mockResolvedValue({ data: { slots: { [date]: [{ time: `${date}T14:00:00Z` }] } } } as never);
+    const retry = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantA, username: 'dr-x', date });
+    expect(retry.body.data.availableSlots).toHaveLength(1);
+  });
+
+  it('does not share cached slots between two tenants with the same username', async () => {
+    getSlots.mockResolvedValue({ data: { slots: { [date]: [{ time: `${date}T14:00:00Z` }] } } } as never);
+    await request(app).get('/api/v1/voice/check-availability').query({ tenant_id: tenantA, username: 'dr-x', date });
+
+    getSlots.mockResolvedValue({ data: { slots: { [date]: [{ time: `${date}T15:00:00Z` }] } } } as never);
+    const res = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantB, username: 'dr-x', date, timeZone: 'America/New_York' });
+
+    expect(res.body.data.cached).toBe(false);
+    expect(res.body.data.availableSlots).toEqual(['11:00 AM']);
+  });
+
+  it('rejects an invalid time zone with 400', async () => {
+    const res = await request(app)
+      .get('/api/v1/voice/check-availability')
+      .query({ tenant_id: tenantA, username: 'dr-x', date, timeZone: 'Mars/Olympus' });
+    expect(res.status).toBe(400);
   });
 });

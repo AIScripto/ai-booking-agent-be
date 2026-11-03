@@ -289,7 +289,7 @@ export class VoiceService {
   ): Promise<{ responseText: string; availableSlots: string[]; executionTimeMs: number; cached?: boolean }> {
     const startTime = Date.now();
     const targetDate = date || new Date().toISOString().split('T')[0];
-    const cacheKey = SlotCacheService.buildKey(username, targetDate, timeZone);
+    const cacheKey = SlotCacheService.buildKey(tenantId || 'no-tenant', username, targetDate, timeZone);
 
     // 1. Check ultra-fast slot cache (<5ms)
     const cachedResult = slotCacheService.get<{ responseText: string; availableSlots: string[] }>(cacheKey);
@@ -311,18 +311,22 @@ export class VoiceService {
         timeZone,
       })) as any;
 
-      const slots = slotsData?.data?.slots?.[targetDate] || [
-        { time: `${targetDate}T09:00:00Z` },
-        { time: `${targetDate}T10:30:00Z` },
-        { time: `${targetDate}T14:00:00Z` },
-      ];
+      // Never invent slots. If Cal.com has none for the day, say so.
+      const slots: Array<{ time: string }> = slotsData?.data?.slots?.[targetDate] || [];
 
-      const formattedTimes = slots.map((s: any) => {
+      const formattedTimes = slots.map((s) => {
         const timeObj = new Date(s.time);
-        return timeObj.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+        return timeObj.toLocaleTimeString('en-US', {
+          hour: 'numeric',
+          minute: '2-digit',
+          hour12: true,
+          timeZone,
+        });
       });
 
-      const responseText = `Available appointment slots for ${targetDate} are at ${formattedTimes.join(', ')}. Which time works best for you?`;
+      const responseText = formattedTimes.length > 0
+        ? `Available appointment slots for ${targetDate} are at ${formattedTimes.join(', ')}. Which time works best for you?`
+        : `There are no available appointment slots on ${targetDate}. Would you like to try another day?`;
       const executionTimeMs = Date.now() - startTime;
 
       const result = {
@@ -339,12 +343,12 @@ export class VoiceService {
         cached: false,
       };
     } catch (error) {
-      console.warn('[VoiceService] CalCom lookup fallback to default slots:', error);
+      // Do not offer made-up slots: a caller could book a time that does not exist.
+      console.warn('[VoiceService] CalCom availability lookup failed:', error);
       const executionTimeMs = Date.now() - startTime;
-      const defaultSlots = ['09:00 AM', '10:30 AM', '02:00 PM'];
       return {
-        responseText: `Available appointment slots for ${targetDate} are at 9:00 AM, 10:30 AM, and 2:00 PM. Which time works best for you?`,
-        availableSlots: defaultSlots,
+        responseText: 'I am unable to check the calendar right now. Please try again in a moment, or I can take your details and have someone call you back.',
+        availableSlots: [],
         executionTimeMs,
         cached: false,
       };

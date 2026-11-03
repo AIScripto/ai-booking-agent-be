@@ -21,8 +21,9 @@ export class SlotCacheService {
   /**
    * Generate cache key for slot lookups
    */
-  public static buildKey(username: string, date: string, timeZone: string): string {
-    return `slots:${username}:${date}:${timeZone}`;
+  public static buildKey(tenantId: string, username: string, date: string, timeZone: string): string {
+    // tenantId comes first so one tenant can never read another tenant's cached slots.
+    return `slots:${tenantId}:${username}:${date}:${timeZone}`;
   }
 
   /**
