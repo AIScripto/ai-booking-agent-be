@@ -11,6 +11,12 @@ import { config } from '../config';
  */
 const SLOT_MINUTES = 30;
 
+/**
+ * A booking may be at most this far in the past. Requests take time to arrive and clocks drift,
+ * so "right now" must not be refused. Anything older is a mistake (for example yesterday).
+ */
+const PAST_GRACE_MS = 5 * 60 * 1000;
+
 export class AppointmentService {
 
   /**
@@ -136,7 +142,7 @@ export class AppointmentService {
       durationMinutes?: number;
     }
   ): Promise<any> {
-    if (data.appointmentDateTime.getTime() < Date.now()) {
+    if (data.appointmentDateTime.getTime() < Date.now() - PAST_GRACE_MS) {
       throw new Error('The appointment time must be in the future.');
     }
 
@@ -157,6 +163,13 @@ export class AppointmentService {
     );
 
     if (!isAvailable) {
+      // An identical request may have been committed between our first check and now.
+      // If the slot is held by this same customer, this is a retry, not a conflict.
+      const justBooked = await this.findHeldByCustomer(tenantId, data);
+      if (justBooked) {
+        return justBooked;
+      }
+
       const nextSlot = await this.findNextAvailableSlot(
         tenantId,
         data.calendarId,

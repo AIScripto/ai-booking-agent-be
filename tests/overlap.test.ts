@@ -68,8 +68,10 @@ describe('Overlapping and past appointments (DAT-002)', () => {
     await expect(book(at('10:15'))).resolves.toBeDefined();
   });
 
-  it('rejects a time in the past', async () => {
+  it('rejects a time well in the past, but allows right now (a few minutes of margin)', async () => {
     await expect(book(new Date(Date.now() - 60 * 60 * 1000))).rejects.toThrow(/in the future/);
+    await expect(book(new Date(Date.now() - 10 * 60 * 1000))).rejects.toThrow(/in the future/);
+    await expect(book(new Date(Date.now() - 60 * 1000))).resolves.toBeDefined();
   });
 
   it('lets only one of two overlapping requests win when they race', async () => {

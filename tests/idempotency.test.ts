@@ -89,6 +89,27 @@ describe('Retries and parallel events are safe (DAT-003)', () => {
     expect(await prisma.appointment.count({ where: { tenantId, calendarId, appointmentDateTime: raceSlot } })).toBe(1);
   });
 
+  it('an identical request that loses the race between the two checks still gets success', async () => {
+    const raceSlot = new Date('2031-06-08T10:00:00.000Z');
+    const request = {
+      calendarId,
+      appointmentDateTime: raceSlot,
+      customerName: 'Window Customer',
+      customerPhone: '+10000000032',
+    };
+    const first = await AppointmentService.createAppointment(tenantId, request);
+
+    // Make the first "does this customer already hold the slot?" check see nothing, as a
+    // request does when an identical one commits just after that check.
+    type Internals = { findHeldByCustomer: (...args: unknown[]) => Promise<unknown> };
+    const internals = AppointmentService as unknown as Internals;
+    const original = internals.findHeldByCustomer.bind(AppointmentService);
+    jest.spyOn(internals, 'findHeldByCustomer').mockResolvedValueOnce(null).mockImplementation(original);
+
+    const second = await AppointmentService.createAppointment(tenantId, request);
+    expect(second.id).toBe(first.id);
+  });
+
   it('a different customer asking for a taken slot is still rejected', async () => {
     await expect(
       AppointmentService.createAppointment(tenantId, {
