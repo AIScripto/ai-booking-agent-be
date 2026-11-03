@@ -136,10 +136,46 @@ export class AppointmentService {
       });
     } catch (dbError: any) {
       // Prisma code for unique constraint violation (P2002)
-      if (dbError.code === 'P2002') {
+      if (dbError.code !== 'P2002') {
+        throw dbError;
+      }
+
+      // A cancelled appointment keeps its row, and the unique index still covers it.
+      // Take that row over for the new customer. The status filter makes this atomic:
+      // if two callers race, only one update matches and the other gets a conflict.
+      const reclaimed = await prisma.appointment.updateMany({
+        where: {
+          tenantId,
+          calendarId: data.calendarId,
+          appointmentDateTime: data.appointmentDateTime,
+          status: 'CANCELLED',
+        },
+        data: {
+          status: 'SCHEDULED',
+          customerName: data.customerName,
+          customerPhone: data.customerPhone,
+          customerEmail: data.customerEmail || null,
+          googleEventId: null,
+          joinToken: null,
+          meetingUrl: null,
+          meetingProvider: null,
+          meetingExpiresAt: null,
+        },
+      });
+      if (reclaimed.count !== 1) {
         throw new Error('Concurrency conflict: The requested slot was booked by another caller.');
       }
-      throw dbError;
+      appointment = await prisma.appointment.findFirst({
+        where: {
+          tenantId,
+          calendarId: data.calendarId,
+          appointmentDateTime: data.appointmentDateTime,
+          status: 'SCHEDULED',
+        },
+      });
+      if (!appointment) {
+        throw new Error('Concurrency conflict: The requested slot was booked by another caller.');
+      }
     }
 
     // Trigger background asynchronous Google Calendar synchronization
