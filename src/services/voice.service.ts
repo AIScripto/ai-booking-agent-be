@@ -1,5 +1,6 @@
 import { AppointmentService } from './appointment.service';
 import { prisma } from './db.service';
+import { TRANSACTION_OPTIONS } from '../config/timeouts';
 import { calComService } from './calcom.service';
 import { slotCacheService, SlotCacheService } from './slot-cache.service';
 
@@ -279,7 +280,7 @@ export class VoiceService {
             payload: payload,
           },
         });
-      });
+      }, TRANSACTION_OPTIONS);
       return;
     }
 

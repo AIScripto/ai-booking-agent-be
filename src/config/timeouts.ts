@@ -10,3 +10,10 @@ export const TIMEOUTS = {
   BACKGROUND_CALL_MS: 8000,
   NEXT_SLOT_SEARCH_MS: 4000,
 } as const;
+
+/**
+ * Prisma interactive transactions wait 2 s to start and 5 s to finish by default. Starting can
+ * include opening a database connection, so allow more room. The work inside is a lock and a
+ * couple of small queries, so it stays far below these limits when the database is healthy.
+ */
+export const TRANSACTION_OPTIONS = { maxWait: 5000, timeout: 10000 } as const;

@@ -2,7 +2,8 @@ import { prisma } from './db.service';
 import { GoogleCalendarService } from './google-calendar.service';
 import { SmsService } from './sms.service';
 import { EmailService } from './email.service';
-import { TIMEOUTS } from '../config/timeouts';
+import { TIMEOUTS, TRANSACTION_OPTIONS } from '../config/timeouts';
+import { config } from '../config';
 
 /**
  * Every booking is this long. The Appointment table does not store a duration, so an
@@ -164,16 +165,7 @@ export class AppointmentService {
       );
 
       if (nextSlot) {
-        const formatter = new Intl.DateTimeFormat('en-US', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-          hour: 'numeric',
-          minute: '2-digit',
-          timeZoneName: 'short',
-        });
-        const formattedTime = formatter.format(nextSlot);
+        const formattedTime = this.formatForCustomer(nextSlot, true);
         throw new Error(`The requested slot is already booked. The next available slot is on ${formattedTime}. Would you like to book that instead?`);
       }
 
@@ -213,7 +205,7 @@ export class AppointmentService {
             status: 'SCHEDULED',
           },
         });
-      });
+      }, TRANSACTION_OPTIONS);
     } catch (dbError: any) {
       // Prisma code for unique constraint violation (P2002)
       if (dbError.code !== 'P2002') {
@@ -275,6 +267,22 @@ export class AppointmentService {
     });
 
     return appointment;
+  }
+
+  /**
+   * A time as the customer should read or hear it: in DEFAULT_TIME_ZONE, never the server's
+   * zone (the container runs in UTC). Stored times stay in UTC.
+   */
+  private static formatForCustomer(date: Date, withWeekday = false): string {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: config.DEFAULT_TIME_ZONE,
+      ...(withWeekday ? { weekday: 'long' as const, month: 'long' as const } : { month: 'short' as const }),
+      year: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZoneName: 'short',
+    }).format(date);
   }
 
   /**
@@ -351,7 +359,7 @@ export class AppointmentService {
       start: Date;
     }
   ): Promise<void> {
-    const dateTimeStr = details.start.toLocaleString();
+    const dateTimeStr = this.formatForCustomer(details.start);
     const smsBody = SmsService.formatConfirmationText(details.customerName, 'Consultation', dateTimeStr);
 
     const channels: Array<{ name: string; send: () => Promise<{ status: string; reason?: string }> }> = [

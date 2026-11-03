@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { config } from '../config';
 
 export const webhookQuerySchema = z.object({
   tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }),
@@ -31,7 +32,7 @@ export const checkAvailabilitySchema = z.object({
   timeZone: z
     .string()
     .optional()
-    .default('America/New_York')
+    .default(config.DEFAULT_TIME_ZONE)
     .refine(
       (tz) => {
         try {
