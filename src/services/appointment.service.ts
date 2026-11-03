@@ -4,7 +4,40 @@ import { SmsService } from './sms.service';
 import { EmailService } from './email.service';
 import { TIMEOUTS } from '../config/timeouts';
 
+/**
+ * Every booking is this long. The Appointment table does not store a duration, so an
+ * existing appointment is assumed to last this many minutes when checking for overlaps.
+ */
+const SLOT_MINUTES = 30;
+
 export class AppointmentService {
+
+  /**
+   * Where clause for appointments that overlap a new one starting at `start` and lasting
+   * `durationMinutes`, but do NOT start at exactly the same time. The exact same start time
+   * is left to the unique index, which also handles cancelled rows and retries.
+   */
+  private static overlapWhere(
+    tenantId: string,
+    calendarId: string,
+    start: Date,
+    durationMinutes: number
+  ) {
+    return {
+      tenantId,
+      calendarId,
+      status: 'SCHEDULED',
+      AND: [
+        {
+          appointmentDateTime: {
+            gt: new Date(start.getTime() - SLOT_MINUTES * 60000),
+            lt: new Date(start.getTime() + durationMinutes * 60000),
+          },
+        },
+        { appointmentDateTime: { not: start } },
+      ],
+    };
+  }
 
   /**
    * Checks availability of a slot across both the local database and the external Google Calendar.
@@ -26,6 +59,14 @@ export class AppointmentService {
     });
 
     if (localConflict) {
+      return false;
+    }
+
+    // Overlap: a 10:15 booking must not be accepted while a 10:00 (30 minute) one exists.
+    const overlapping = await prisma.appointment.findFirst({
+      where: this.overlapWhere(tenantId, calendarId, dateTime, durationMinutes),
+    });
+    if (overlapping) {
       return false;
     }
 
@@ -94,6 +135,10 @@ export class AppointmentService {
       durationMinutes?: number;
     }
   ): Promise<any> {
+    if (data.appointmentDateTime.getTime() < Date.now()) {
+      throw new Error('The appointment time must be in the future.');
+    }
+
     // A retry of the same request is not a conflict. If this customer already holds this
     // exact slot, return that appointment (voice platforms redeliver webhooks, and
     // staff can double-click). No second row, no second notification.
@@ -139,16 +184,35 @@ export class AppointmentService {
     // If a concurrent process insert succeeded right before us, the db unique constraint will catch it.
     let appointment;
     try {
-      appointment = await prisma.appointment.create({
-        data: {
-          tenantId,
-          calendarId: data.calendarId,
-          appointmentDateTime: data.appointmentDateTime,
-          customerName: data.customerName,
-          customerPhone: data.customerPhone,
-          customerEmail: data.customerEmail || null,
-          status: 'SCHEDULED',
-        },
+      // The unique index only catches the exact same start time. Overlaps (10:00 and 10:15)
+      // are caught by re-checking under a lock for this tenant and calendar, so two callers
+      // asking for overlapping times at once cannot both win.
+      appointment = await prisma.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${data.calendarId}))`;
+
+        const overlapping = await tx.appointment.findFirst({
+          where: this.overlapWhere(
+            tenantId,
+            data.calendarId,
+            data.appointmentDateTime,
+            data.durationMinutes ?? SLOT_MINUTES
+          ),
+        });
+        if (overlapping) {
+          throw new Error('The requested slot is already booked.');
+        }
+
+        return tx.appointment.create({
+          data: {
+            tenantId,
+            calendarId: data.calendarId,
+            appointmentDateTime: data.appointmentDateTime,
+            customerName: data.customerName,
+            customerPhone: data.customerPhone,
+            customerEmail: data.customerEmail || null,
+            status: 'SCHEDULED',
+          },
+        });
       });
     } catch (dbError: any) {
       // Prisma code for unique constraint violation (P2002)
