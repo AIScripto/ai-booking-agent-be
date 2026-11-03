@@ -91,7 +91,7 @@ export class VoiceService {
     toolCall: ToolCallInput
   ): Promise<any> {
     const { name, arguments: args } = toolCall;
-    console.log(`[VoiceService] Executing tool: ${name} with args:`, args);
+    console.log(`[VoiceService] Executing tool: ${name}`);
 
     try {
       switch (name) {

@@ -46,6 +46,13 @@ export class AuthController {
         !config.GOOGLE_CLIENT_SECRET.includes('mock');
 
       if (!isGoogleConfigured) {
+        if (config.NODE_ENV === 'production') {
+          res.status(503).json({
+            status: 'error',
+            message: 'Google Calendar integration is not configured.',
+          });
+          return;
+        }
         const backendUrl = `${req.protocol}://${req.get('host')}`;
         const authUrl = `${backendUrl}/api/v1/auth/google/callback?code=mock-code&state=${tenantId}`;
         res.status(200).json({
@@ -114,21 +121,31 @@ export class AuthController {
       }
 
       if (code === 'mock-code') {
-        const expiryDate = new Date(Date.now() + 365 * 24 * 3600 * 1000); // 1 year
-        await prisma.googleCredential.upsert({
-          where: { tenantId },
-          update: {
-            accessToken: 'mock-access-token',
-            refreshToken: 'mock-refresh-token',
-            expiryDate,
-          },
-          create: {
-            tenantId,
-            accessToken: 'mock-access-token',
-            refreshToken: 'mock-refresh-token',
-            expiryDate,
-          },
-        });
+        // Local development only. Never allowed in production, and it never
+        // replaces a real credential that is already stored for the tenant.
+        if (config.NODE_ENV === 'production') {
+          res.status(400).send(`
+          <html>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding-top: 100px; background-color: #f8fafc;">
+              <h2 style="color: #ef4444;">Invalid Request</h2>
+              <p>Missing auth code or invalid tenant session ID.</p>
+            </body>
+          </html>
+        `);
+          return;
+        }
+        const existing = await prisma.googleCredential.findUnique({ where: { tenantId } });
+        if (!existing) {
+          const expiryDate = new Date(Date.now() + 365 * 24 * 3600 * 1000); // 1 year
+          await prisma.googleCredential.create({
+            data: {
+              tenantId,
+              accessToken: 'mock-access-token',
+              refreshToken: 'mock-refresh-token',
+              expiryDate,
+            },
+          });
+        }
       } else {
         // Initialize OAuth2 client
         const oauth2Client = new google.auth.OAuth2(

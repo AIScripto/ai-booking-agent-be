@@ -14,7 +14,7 @@ export class SmsService {
    * Sends instant SMS or WhatsApp confirmation message to patient/client.
    */
   public static async sendConfirmation(payload: SmsPayload): Promise<{ success: boolean; sid: string }> {
-    console.log(`[SmsService] Sending ${payload.isWhatsApp ? 'WhatsApp' : 'SMS'} to ${payload.to}: ${payload.body}`);
+    console.log(`[SmsService] Sending ${payload.isWhatsApp ? 'WhatsApp' : 'SMS'} message`);
 
     // Mock resilient execution if live Twilio credentials are missing in local dev
     if (!this.accountSid || this.accountSid.startsWith('ACxxxx')) {
@@ -27,7 +27,7 @@ export class SmsService {
       const from = payload.isWhatsApp ? this.fromWhatsApp : this.fromPhone;
       const to = payload.isWhatsApp && !payload.to.startsWith('whatsapp:') ? `whatsapp:${payload.to}` : payload.to;
 
-      console.log(`[SmsService.live] Dispatching from ${from} to ${to}`);
+      console.log('[SmsService.live] Dispatching message');
       return { success: true, sid: `SM_live_${Date.now()}` };
     } catch (error) {
       console.error('[SmsService] Failed to send SMS:', error);

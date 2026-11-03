@@ -14,8 +14,6 @@ export class VoiceController {
     next: NextFunction
   ): Promise<void> {
     try {
-      console.log('📬 [Incoming Vapi Webhook Body]:', JSON.stringify(req.body, null, 2));
-      
       // 1. Simple Security API Key Verification
       const apiKey = req.headers['x-api-key'] || req.headers['authorization'];
       

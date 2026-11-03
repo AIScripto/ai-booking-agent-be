@@ -44,7 +44,7 @@ export class EmailService {
    * Dispatches email with optional .ics calendar attachment.
    */
   public static async sendAppointmentConfirmation(payload: EmailPayload): Promise<{ success: boolean; messageId: string }> {
-    console.log(`[EmailService] Preparing confirmation email for ${payload.to}`);
+    console.log('[EmailService] Preparing confirmation email');
 
     const icsContent = this.generateIcsContent(payload);
     console.log(`[EmailService] Generated .ics iCalendar file attachment (${icsContent.length} bytes)`);
@@ -55,7 +55,7 @@ export class EmailService {
     }
 
     try {
-      console.log(`[EmailService.live] Dispatching email from ${this.fromEmail} to ${payload.to}`);
+      console.log('[EmailService.live] Dispatching email');
       return { success: true, messageId: `msg_live_${Date.now()}` };
     } catch (error) {
       console.error('[EmailService] Failed to dispatch email:', error);
