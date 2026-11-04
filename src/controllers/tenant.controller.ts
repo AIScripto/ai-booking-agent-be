@@ -4,9 +4,19 @@ import { getVocabulary } from '../config/industry-vocabulary';
 import { z } from 'zod';
 import { IndustryType } from '@prisma/client';
 import { slotCacheService } from '../services/slot-cache.service';
+import { config } from '../config';
 
 
 export class TenantController {
+  /** When appointments can be offered (server settings). Days: 0 = Sunday ... 6 = Saturday. */
+  private static businessHours() {
+    return {
+      start: config.BUSINESS_HOURS_START,
+      end: config.BUSINESS_HOURS_END,
+      days: config.BUSINESS_DAYS.split(',').map(Number),
+    };
+  }
+
   /**
    * The caller's tenant from the verified login token. Sends 401 and returns null if missing.
    * The request's own body, query and headers are never used to choose a tenant.
@@ -35,9 +45,12 @@ export class TenantController {
         status: 'success',
         data: {
           tenantId,
-          tenantName: tenant?.name || 'Default Tenant',
-          industry: tenant?.industry || 'GENERAL',
+          tenantName: tenant?.name ?? null,
+          industry: tenant?.industry ?? null,
           vocabulary,
+          // The time zone every time should be shown in (times are stored in UTC).
+          timeZone: config.DEFAULT_TIME_ZONE,
+          businessHours: TenantController.businessHours(),
         },
       });
     } catch (error) {
@@ -81,6 +94,8 @@ export class TenantController {
           resources: tenant.resources,
           serviceTypes: tenant.serviceTypes,
           departments: tenant.departments,
+          timeZone: config.DEFAULT_TIME_ZONE,
+          businessHours: TenantController.businessHours(),
         },
       });
 

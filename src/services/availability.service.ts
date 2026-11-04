@@ -58,6 +58,16 @@ export function isRealDate(date: string): boolean {
   return parsed.getUTCFullYear() === y && parsed.getUTCMonth() === m - 1 && parsed.getUTCDate() === d;
 }
 
+/**
+ * The start of a calendar date and the start of the next date, as UTC instants, in a time zone.
+ * Use `>= start` and `< end` to pick the appointments of that date.
+ */
+export function dayBoundsUtc(date: string, timeZone: string): { start: Date; end: Date } {
+  const [y, m, d] = date.split('-').map(Number);
+  const next = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
+  return { start: zonedTimeToUtc(date, '00:00', timeZone), end: zonedTimeToUtc(next, '00:00', timeZone) };
+}
+
 /** Today's date in a time zone, as YYYY-MM-DD. */
 export function todayIn(timeZone: string, now: Date = new Date()): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(now);

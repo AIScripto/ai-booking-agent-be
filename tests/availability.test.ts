@@ -1,4 +1,4 @@
-import { buildDaySlots, isRealDate, removeBusy, todayIn, zonedTimeToUtc } from '../src/services/availability.service';
+import { buildDaySlots, dayBoundsUtc, isRealDate, removeBusy, todayIn, zonedTimeToUtc } from '../src/services/availability.service';
 
 const NY = 'America/New_York';
 const hours = { start: '09:00', end: '17:00', days: [1, 2, 3, 4, 5] };
@@ -64,5 +64,25 @@ describe('Removing busy time', () => {
     const free = removeBusy(slots, busy).map((s) => s.toISOString());
     for (const gone of ['14:00', '14:30', '15:00', '15:30']) expect(free).not.toContain(`2026-08-11T${gone}:00.000Z`);
     expect(free).toContain('2026-08-11T16:00:00.000Z');
+  });
+});
+
+describe('Day bounds in the business time zone', () => {
+  it('a summer day in New York runs from 04:00 UTC to 04:00 UTC the next day', () => {
+    const { start, end } = dayBoundsUtc('2026-08-11', NY);
+    expect(start.toISOString()).toBe('2026-08-11T04:00:00.000Z');
+    expect(end.toISOString()).toBe('2026-08-12T04:00:00.000Z');
+  });
+
+  it('the day the clocks go back is 25 hours long, and the day they go forward is 23', () => {
+    const back = dayBoundsUtc('2026-11-01', NY);
+    expect((back.end.getTime() - back.start.getTime()) / 3600000).toBe(25);
+    const forward = dayBoundsUtc('2026-03-08', NY);
+    expect((forward.end.getTime() - forward.start.getTime()) / 3600000).toBe(23);
+  });
+
+  it('works across a month and a year end', () => {
+    expect(dayBoundsUtc('2026-12-31', NY).end.toISOString()).toBe('2027-01-01T05:00:00.000Z');
+    expect(dayBoundsUtc('2026-02-28', NY).end.toISOString()).toBe('2026-03-01T05:00:00.000Z');
   });
 });

@@ -216,7 +216,9 @@ describe('Authentication and tenant isolation (SEC-012)', () => {
         .set(bearer(adminA))
         .set('x-tenant-id', tenantB);
 
-      expect(res.status).toBe(200);
+      if (res.status !== 200 || !Array.isArray(res.body.data)) {
+        throw new Error(`Unexpected answer ${res.status}: ${JSON.stringify(res.body)}`);
+      }
       const names = res.body.data.map((l: { customerName: string }) => l.customerName);
       expect(names).toContain('Visible To A');
       expect(names).not.toContain('Secret Of B');
@@ -257,5 +259,50 @@ describe('Authentication and tenant isolation (SEC-012)', () => {
       expect(hash).toMatch(/^\$2[aby]\$/);
       expect(hash).not.toContain('some long password');
     });
+  });
+});
+
+describe('GET /api/v1/auth/google/status (Dashboard calendar status)', () => {
+  const tenantId = '3f1c8a52-0b7d-4c1e-9a55-6d2e7b1f1901';
+  let staff: TestStaff;
+  let patient: TestStaff;
+
+  beforeAll(async () => {
+    await prisma.tenant.upsert({ where: { id: tenantId }, update: {}, create: { id: tenantId, name: 'Google Status Test', industry: 'HEALTHCARE' } });
+    staff = await createStaff(tenantId, 'FRONT_DESK');
+    patient = await createStaff(tenantId, 'PATIENT');
+    await prisma.googleCredential.deleteMany({ where: { tenantId } });
+  });
+
+  afterAll(async () => {
+    await prisma.googleCredential.deleteMany({ where: { tenantId } });
+    await removeStaff(staff, patient);
+    await prisma.tenant.deleteMany({ where: { id: tenantId } });
+  });
+
+  it('needs a login, and not a patient account', async () => {
+    expect((await request(app).get('/api/v1/auth/google/status')).status).toBe(401);
+    expect((await request(app).get('/api/v1/auth/google/status').set(bearer(patient))).status).toBe(403);
+  });
+
+  it('says the tenant uses its own account only when a real refresh token is stored, and never returns a token', async () => {
+    const before = await request(app).get('/api/v1/auth/google/status').set(bearer(staff));
+    expect(before.status).toBe(200);
+    expect(before.body.data.source).not.toBe('tenant');
+
+    for (const refreshToken of ['', 'mock-refresh-token']) {
+      await prisma.googleCredential.upsert({
+        where: { tenantId },
+        update: { refreshToken },
+        create: { tenantId, accessToken: 'a', refreshToken, expiryDate: new Date(Date.now() + 3600_000) },
+      });
+      const res = await request(app).get('/api/v1/auth/google/status').set(bearer(staff));
+      expect(res.body.data.source).not.toBe('tenant');
+    }
+
+    await prisma.googleCredential.update({ where: { tenantId }, data: { refreshToken: 'real-looking-refresh-token' } });
+    const after = await request(app).get('/api/v1/auth/google/status').set(bearer(staff));
+    expect(after.body.data.source).toBe('tenant');
+    expect(JSON.stringify(after.body)).not.toContain('real-looking-refresh-token');
   });
 });

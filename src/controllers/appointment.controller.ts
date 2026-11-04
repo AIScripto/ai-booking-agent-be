@@ -3,6 +3,8 @@ import { prisma } from '../services/db.service';
 import { AppointmentService } from '../services/appointment.service';
 import { TelehealthService, TelehealthUnavailableError } from '../services/telehealth.service';
 import { z } from 'zod';
+import { config } from '../config';
+import { dayBoundsUtc, isRealDate } from '../services/availability.service';
 
 
 export class AppointmentController {
@@ -36,13 +38,11 @@ export class AppointmentController {
         status: 'SCHEDULED', // Only list active scheduled appointments
       };
 
-      if (dateStr && z.string().regex(/^\d{4}-\d{2}-\d{2}$/).safeParse(dateStr).success) {
-        const startOfDay = new Date(`${dateStr}T00:00:00.000Z`);
-        const endOfDay = new Date(`${dateStr}T23:59:59.999Z`);
-        whereCondition.appointmentDateTime = {
-          gte: startOfDay,
-          lte: endOfDay,
-        };
+      if (dateStr && isRealDate(dateStr)) {
+        // The date is the business's calendar day (DEFAULT_TIME_ZONE), not the UTC day: an evening
+        // appointment belongs to the day it is on for the people who book it.
+        const { start, end } = dayBoundsUtc(dateStr, config.DEFAULT_TIME_ZONE);
+        whereCondition.appointmentDateTime = { gte: start, lt: end };
       }
 
       const appointments = await prisma.appointment.findMany({

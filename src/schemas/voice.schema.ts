@@ -31,6 +31,8 @@ export const checkAvailabilitySchema = z.object({
   tenant_id: z.string().uuid({ message: 'tenant_id must be a valid UUID.' }),
   // The calendar to check. Defaults to the same default calendar the webhook uses.
   calendar_id: z.string().min(1).optional().default(config.GOOGLE_DEFAULT_CALENDAR_ID),
+  // How many times to return. The voice agent reads a few aloud (default); screens can ask for more.
+  limit: z.coerce.number().int().min(1).max(50).optional(),
   date: z
     .string()
     .optional()

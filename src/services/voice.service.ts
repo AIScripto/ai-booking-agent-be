@@ -319,9 +319,13 @@ export class VoiceService {
     tenantId: string,
     calendarId: string,
     date?: string,
-    timeZone: string = config.DEFAULT_TIME_ZONE
+    timeZone: string = config.DEFAULT_TIME_ZONE,
+    limit: number = MAX_SPOKEN_SLOTS
   ): Promise<{
     responseText: string;
+    closed: boolean;
+    /** True when the calendar could not be read, so no times could be worked out. */
+    unavailable: boolean;
     availableSlots: string[];
     availableSlotsIso: string[];
     totalFree: number;
@@ -332,38 +336,47 @@ export class VoiceService {
     const targetDate = date || todayIn(timeZone);
     const cacheKey = SlotCacheService.buildKey(tenantId, calendarId, targetDate, timeZone);
 
-    type Answer = Omit<Awaited<ReturnType<typeof VoiceService.checkAvailabilitySlots>>, 'executionTimeMs' | 'cached'>;
-    const cachedResult = slotCacheService.get<Answer>(cacheKey);
-    if (cachedResult) {
-      return { ...cachedResult, executionTimeMs: Date.now() - startTime, cached: true };
+    // The cache holds every free time for the day; the answer is cut to `limit` for each request.
+    type FullDay = { closed: boolean; slotsIso: string[] };
+    const answer = (full: FullDay, cached: boolean) => {
+      const spokenIso = full.slotsIso.slice(0, limit);
+      const labels = spokenIso.map((iso) =>
+        new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone })
+      );
+      let responseText: string;
+      if (full.closed) {
+        responseText = `We are closed on ${targetDate}. Would you like to try another day?`;
+      } else if (full.slotsIso.length === 0) {
+        responseText = `There are no available appointment slots on ${targetDate}. Would you like to try another day?`;
+      } else {
+        const more =
+          full.slotsIso.length > spokenIso.length
+            ? ` There are ${full.slotsIso.length - spokenIso.length} more times if none of these suit you.`
+            : '';
+        responseText = `Available appointment slots for ${targetDate} are at ${labels.join(', ')}.${more} Which time works best for you?`;
+      }
+      return {
+        responseText,
+        closed: full.closed,
+        unavailable: false,
+        availableSlots: labels,
+        availableSlotsIso: spokenIso,
+        totalFree: full.slotsIso.length,
+        executionTimeMs: Date.now() - startTime,
+        cached,
+      };
+    };
+
+    const cachedDay = slotCacheService.get<FullDay>(cacheKey);
+    if (cachedDay) {
+      return answer(cachedDay, true);
     }
 
     try {
       const { closed, slots } = await AvailabilityService.getFreeSlots(tenantId, calendarId, targetDate, timeZone);
-
-      const spoken = slots.slice(0, MAX_SPOKEN_SLOTS);
-      const labels = spoken.map((slot) =>
-        slot.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone })
-      );
-
-      let responseText: string;
-      if (closed) {
-        responseText = `We are closed on ${targetDate}. Would you like to try another day?`;
-      } else if (slots.length === 0) {
-        responseText = `There are no available appointment slots on ${targetDate}. Would you like to try another day?`;
-      } else {
-        const more = slots.length > spoken.length ? ` There are ${slots.length - spoken.length} more times if none of these suit you.` : '';
-        responseText = `Available appointment slots for ${targetDate} are at ${labels.join(', ')}.${more} Which time works best for you?`;
-      }
-
-      const answer: Answer = {
-        responseText,
-        availableSlots: labels,
-        availableSlotsIso: spoken.map((slot) => slot.toISOString()),
-        totalFree: slots.length,
-      };
-      slotCacheService.set(cacheKey, answer, 30);
-      return { ...answer, executionTimeMs: Date.now() - startTime, cached: false };
+      const full: FullDay = { closed, slotsIso: slots.map((slot) => slot.toISOString()) };
+      slotCacheService.set(cacheKey, full, 30);
+      return answer(full, false);
     } catch (error) {
       // Do not offer made-up slots: a caller could book a time that does not exist.
       if (!(error instanceof AvailabilityUnavailableError)) {
@@ -372,6 +385,8 @@ export class VoiceService {
       return {
         responseText:
           'I am unable to check the calendar right now. Please try again in a moment, or I can take your details and have someone call you back.',
+        closed: false,
+        unavailable: true,
         availableSlots: [],
         availableSlotsIso: [],
         totalFree: 0,

@@ -51,6 +51,7 @@ function hasCsrfHeader(req: Request): boolean {
 }
 import { OAuthStateService } from '../services/oauth-state.service';
 import { AuthError, AuthService } from '../services/auth.service';
+import { GoogleCalendarService } from '../services/google-calendar.service';
 import { loginSchema } from '../schemas/auth.schema';
 
 function escapeHtml(value: unknown): string {
@@ -134,6 +135,24 @@ export class AuthController {
       }
       clearRefreshCookie(req, res);
       res.status(200).json({ status: 'success', data: null });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/v1/auth/google/status
+   * Which Google account the signed-in user's tenant uses for its calendar. Never returns a token.
+   */
+  public static async googleStatus(req: Request, res: Response, next: NextFunction): Promise<void> {
+    try {
+      const tenantId = req.auth?.tenantId;
+      if (!tenantId) {
+        res.status(401).json({ status: 'error', message: 'Authentication required.' });
+        return;
+      }
+      const { source } = await GoogleCalendarService.getConnectionStatus(tenantId);
+      res.status(200).json({ status: 'success', data: { source } });
     } catch (error) {
       next(error);
     }

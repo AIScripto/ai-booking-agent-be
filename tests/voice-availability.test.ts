@@ -85,10 +85,27 @@ describe('Voice availability: one source of truth (ARC-001, D3)', () => {
     expect(res.body.data.totalFree).toBe(16 - 1 - 2);
   });
 
+  it('returns more times when a screen asks for them (limit), up to 50, and the answer says closed:false', async () => {
+    const res = await get(q({ limit: '20' }));
+    expect(res.body.data.availableSlots).toHaveLength(16);
+    expect(res.body.data.availableSlotsIso).toHaveLength(16);
+    expect(res.body.data.totalFree).toBe(16);
+    expect(res.body.data.closed).toBe(false);
+    expect(res.body.data.responseText).not.toContain('more times');
+
+    const few = await get(q({ limit: '2' }));
+    expect(few.body.data.availableSlots).toHaveLength(2);
+    expect(few.body.data.cached).toBe(true); // same day, answered from the cache, cut to 2
+
+    expect((await get(q({ limit: '51' }))).status).toBe(400);
+    expect((await get(q({ limit: '0' }))).status).toBe(400);
+  });
+
   it('says the business is closed on a weekend', async () => {
     const res = await get(q({ date: saturday }));
     expect(res.status).toBe(200);
     expect(res.body.data.availableSlots).toEqual([]);
+    expect(res.body.data.closed).toBe(true);
     expect(res.body.data.responseText).toContain('closed');
   });
 
@@ -98,9 +115,12 @@ describe('Voice availability: one source of truth (ARC-001, D3)', () => {
     expect(failed.status).toBe(200);
     expect(failed.body.data.availableSlots).toEqual([]);
     expect(failed.body.data.responseText).toContain('unable to check the calendar');
+    expect(failed.body.data.unavailable).toBe(true);
+    expect(failed.body.data.closed).toBe(false);
 
     const retry = await get(q());
     expect(retry.body.data.availableSlots.length).toBeGreaterThan(0);
+    expect(retry.body.data.unavailable).toBe(false);
   });
 
   it('never asks Cal.com', async () => {

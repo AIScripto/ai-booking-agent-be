@@ -73,19 +73,38 @@ export class GoogleCalendarService {
       return false;
     }
 
-    // Check if the central fallback in .env is configured with real credentials
-    const isCentralConfigured =
-      config.GOOGLE_CLIENT_ID &&
-      config.GOOGLE_CLIENT_ID !== 'your-google-client-id' &&
-      !config.GOOGLE_CLIENT_ID.includes('mock') &&
-      config.GOOGLE_CLIENT_SECRET &&
-      config.GOOGLE_CLIENT_SECRET !== 'your-google-client-secret' &&
-      !config.GOOGLE_CLIENT_SECRET.includes('mock') &&
-      config.GOOGLE_REFRESH_TOKEN &&
-      config.GOOGLE_REFRESH_TOKEN !== 'your-google-refresh-token' &&
-      config.GOOGLE_REFRESH_TOKEN !== 'mock-refresh-token';
+    return !this.isCentralConfigured();
+  }
 
-    return !isCentralConfigured;
+  /** True when the shared Google account in the server settings (not a tenant's own) is real. */
+  private static isCentralConfigured(): boolean {
+    return Boolean(
+      config.GOOGLE_CLIENT_ID &&
+        config.GOOGLE_CLIENT_ID !== 'your-google-client-id' &&
+        !config.GOOGLE_CLIENT_ID.includes('mock') &&
+        config.GOOGLE_CLIENT_SECRET &&
+        config.GOOGLE_CLIENT_SECRET !== 'your-google-client-secret' &&
+        !config.GOOGLE_CLIENT_SECRET.includes('mock') &&
+        config.GOOGLE_REFRESH_TOKEN &&
+        config.GOOGLE_REFRESH_TOKEN !== 'your-google-refresh-token' &&
+        config.GOOGLE_REFRESH_TOKEN !== 'mock-refresh-token'
+    );
+  }
+
+  /**
+   * Which Google account the calendar uses for this tenant. Read only; never returns a token.
+   *  tenant = the tenant connected its own account; shared = the account in the server settings;
+   *  none = no real Google account (calendar checks and events are skipped).
+   */
+  public static async getConnectionStatus(tenantId: string): Promise<{ source: 'tenant' | 'shared' | 'none' }> {
+    const credentials = await prisma.googleCredential.findUnique({
+      where: { tenantId },
+      select: { refreshToken: true },
+    });
+    if (credentials && credentials.refreshToken && credentials.refreshToken !== 'mock-refresh-token') {
+      return { source: 'tenant' };
+    }
+    return { source: this.isCentralConfigured() ? 'shared' : 'none' };
   }
 
   /**
